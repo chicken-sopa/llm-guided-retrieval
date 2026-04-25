@@ -3,6 +3,7 @@ import asyncio
 import os
 import time
 import logging
+from copy import deepcopy
 from tqdm.auto import tqdm
 from abc import ABC
 from abc import abstractmethod
@@ -23,6 +24,40 @@ async def _run_and_return_index(index, coro):
         return index, result
     except Exception as e:
         return index, e
+
+def _add_additional_properties_false(schema: Any) -> Any:
+    if isinstance(schema, dict):
+        normalized = {k: _add_additional_properties_false(v) for k, v in schema.items()}
+        if normalized.get("type") == "object":
+            normalized["additionalProperties"] = False
+        return normalized
+    if isinstance(schema, list):
+        return [_add_additional_properties_false(item) for item in schema]
+    return schema
+
+def normalize_openai_schema(schema: Dict[str, Any], name: str = "response") -> Dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "name": name,
+        "strict": True,
+        "schema": _add_additional_properties_false(deepcopy(schema)),
+    }
+
+def _extract_openai_response_text(response: Any) -> str:
+    text = getattr(response, 'output_text', None)
+    if text and text.strip():
+        return text.strip()
+
+    output_items = getattr(response, 'output', None) or []
+    text_parts = []
+    for item in output_items:
+        for content in getattr(item, 'content', None) or []:
+            if getattr(content, 'type', None) == 'output_text':
+                content_text = getattr(content, 'text', None)
+                if content_text:
+                    text_parts.append(content_text)
+
+    return ''.join(text_parts).strip()
 
 class BatchMetrics:
     """Class to track batch processing metrics and errors."""
@@ -536,6 +571,97 @@ class GenAIAPI(LanguageModelAPI):
         Args:
             **kwargs: Configuration parameters to update
         """
+        self.default_config.update(kwargs)
+        self.logger.info(f"Updated config: {kwargs}")
+
+#@title `OpenAIResponsesAPI` implementation
+class OpenAIResponsesAPI(LanguageModelAPI):
+    """
+    OpenAI Responses API implementation of the LanguageModelAPI.
+
+    Supports string prompts and structured JSON outputs.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        api_key: Optional[str] = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+        logger: Optional[logging.Logger] = None,
+        **kwargs: Any,
+    ):
+        if api_key is None:
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise ValueError("API key must be provided or set in OPENAI_API_KEY environment variable")
+
+        super().__init__(model_name, api_key, timeout, max_retries, logger, **kwargs)
+
+        self.client = AsyncOpenAI(api_key=self.api_key, timeout=self.timeout)
+        self.default_config = {}
+
+        self.logger.info(f"Initialized OpenAI Responses client with model: {self.model_name}")
+
+    def _format_prompt(self, prompt: Any) -> Any:
+        if isinstance(prompt, str):
+            return prompt
+        if isinstance(prompt, list):
+            return prompt
+        self.logger.warning(f"Unexpected prompt type: {type(prompt)}, converting to string")
+        return str(prompt)
+
+    async def _call_api(self, prompt: Any, **kwargs: Any) -> Any:
+        config_params = {**self.default_config, **kwargs}
+
+        config_params.pop('max_retries', None)
+        config_params.pop('timeout', None)
+        config_params.pop('prompt_index', None)
+        config_params.pop('response_mime_type', None)
+        config_params.pop('thinking_config', None)
+
+        response_schema = config_params.pop('response_schema', None)
+
+        request_params = {
+            'model': self.model_name,
+            'input': prompt,
+            **config_params,
+        }
+
+        if response_schema:
+            request_params['text'] = {
+                'format': normalize_openai_schema(response_schema),
+            }
+
+        try:
+            response = await self.client.responses.create(**request_params)
+            return response
+        except Exception as e:
+            self.logger.debug(f"OpenAI Responses API call failed: {str(e)}")
+            raise
+
+    def _validate_and_parse_response(self, response: Any, **kwargs) -> str:
+        constraint = kwargs.get('response_schema', None)
+        try:
+            if not response:
+                raise ValueError("Empty response from API")
+
+            text = _extract_openai_response_text(response)
+            if not text:
+                raise ValueError("Empty text in response")
+
+            if constraint:
+                is_valid, error = validate_genai_response_constraint(text, constraint)
+                if not is_valid:
+                    raise ValueError(f"Response does not conform to schema: {error}")
+
+            return text
+
+        except Exception as e:
+            self.logger.debug(f"Failed to parse response: {str(e)}")
+            raise ValueError(f"Invalid response format: {str(e)}")
+
+    def update_config(self, **kwargs: Any) -> None:
         self.default_config.update(kwargs)
         self.logger.info(f"Updated config: {kwargs}")
 

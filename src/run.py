@@ -12,6 +12,7 @@ from google.genai import types
 from hyperparams import HyperParams
 from tree_objects import SemanticNode, InferSample
 from llm_apis import GenAIAPI, VllmAPI
+from llm_apis import OpenAIResponsesAPI
 from prompts import get_traversal_prompt_response_constraint, get_reranking_prompt
 from utils import (
     setup_logger, 
@@ -65,6 +66,8 @@ if hp.LLM_API_BACKEND == 'genai':
     llm_api = GenAIAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES)
 elif hp.LLM_API_BACKEND == 'vllm': 
     llm_api = VllmAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES, base_url=','.join([f"http://localhost:{8000+i}/v1" for i in range(4)]))
+elif hp.LLM_API_BACKEND == 'openai':
+    llm_api = OpenAIResponsesAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES)
 else: raise ValueError(f'Unknown LM API backend: {hp.LLM_API_BACKEND}')
 
 llm_api_kwargs = {
@@ -80,6 +83,10 @@ if hp.LLM_API_BACKEND == 'vllm':
     llm_api_kwargs.pop('response_mime_type')
     llm_api_kwargs.pop('thinking_config')
     llm_api_kwargs.pop('response_schema')
+
+if hp.LLM_API_BACKEND == 'openai':
+    llm_api_kwargs.pop('response_mime_type')
+    llm_api_kwargs.pop('thinking_config')
 
 if hp.LOAD_EXISTING and os.path.exists(f'{RESULTS_DIR}/all_eval_sample_dicts-{hp}.pkl'):
   all_eval_samples, all_eval_metric_dfs = load_exp(RESULTS_DIR, hp, semantic_root_node, node_registry, logger)
