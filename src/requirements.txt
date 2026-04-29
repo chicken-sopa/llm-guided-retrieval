@@ -15,3 +15,4 @@ google-genai==1.33.0
 seaborn==0.13.2
 openai
 nbformat>=5.0.0
+graphviz
