@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 from pathlib import Path
 
 import torch
@@ -110,6 +111,67 @@ def normalize_completion(example: dict) -> tuple[list[dict[str, str]], str]:
     )
 
 
+def generate_reply(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    user_prompt: str,
+    max_new_tokens: int = 128,
+) -> str:
+    prompt_messages = [{"role": "user", "content": user_prompt}]
+    prompt = tokenizer.apply_chat_template(
+        prompt_messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=True,
+    )
+    prompt = {key: value.to(model.device) for key, value in prompt.items()}
+
+    model.eval()
+    with torch.no_grad():
+        generated_ids = model.generate(
+            **prompt,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+
+    input_len = prompt["input_ids"].shape[-1]
+    new_tokens = generated_ids[0][input_len:]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+def clear_model_from_memory() -> None:
+    for name in ("trainer", "model", "tokenizer"):
+        if name in globals():
+            del globals()[name]
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def interactive_inference_loop(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+) -> None:
+    print("\nInteractive prompt loop ready.")
+    print("Each question is stateless: no chat history is reused and model weights are not updated.")
+    print("Type 'exit' or 'quit' to stop.\n")
+
+    while True:
+        user_prompt = input("You> ").strip()
+        if not user_prompt:
+            continue
+        if user_prompt.lower() in {"exit", "quit"}:
+            print("Stopping interactive loop.")
+            break
+
+        reply = generate_reply(model, tokenizer, user_prompt)
+        print(f"Model> {reply}\n")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -126,6 +188,8 @@ def main() -> None:
         else torch.float16
     )
 
+    clear_model_from_memory()
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -141,8 +205,8 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
         quantization_config=quantization_config,
-        device_map="auto",
         torch_dtype=compute_dtype,
+        low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
     model = prepare_model_for_kbit_training(model)
@@ -213,11 +277,11 @@ def main() -> None:
         split = tokenized_dataset.train_test_split(test_size=0.1, seed=args.seed)
         train_dataset = split["train"]
         eval_dataset = split["test"]
-        evaluation_strategy = "epoch"
+        eval_strategy = "epoch"
     else:
         train_dataset = tokenized_dataset
         eval_dataset = None
-        evaluation_strategy = "no"
+        eval_strategy = "no"
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
@@ -228,7 +292,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         logging_steps=5,
         save_strategy="epoch",
-        evaluation_strategy=evaluation_strategy,
+        eval_strategy=eval_strategy,
         optim="paged_adamw_8bit",
         bf16=compute_dtype == torch.bfloat16,
         fp16=compute_dtype == torch.float16,
@@ -258,26 +322,8 @@ def main() -> None:
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
 
-    prompt_messages = [{"role": "user", "content": "Explain QLoRA in 3 short bullet points."}]
-    prompt_ids = tokenizer.apply_chat_template(
-        prompt_messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_tensors="pt",
-    ).to(model.device)
-
-    with torch.no_grad():
-        generated_ids = model.generate(
-            prompt_ids,
-            max_new_tokens=128,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
-            eos_token_id=tokenizer.eos_token_id,
-        )
-
-    new_tokens = generated_ids[0][prompt_ids.shape[-1] :]
-    print(tokenizer.decode(new_tokens, skip_special_tokens=True))
+    print(generate_reply(model, tokenizer, "Explain QLoRA in 3 short bullet points."))
+    interactive_inference_loop(model, tokenizer)
 
 
 if __name__ == "__main__":

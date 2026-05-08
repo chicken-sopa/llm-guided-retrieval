@@ -1,5 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 datasets==2.21.0
 ipython==8.12.3
+ipykernel
 json_repair==0.46.2
 jsonschema==4.25.1
 matplotlib==3.10.7
@@ -8,7 +11,9 @@ pandas==2.3.3
 plotly==6.3.0
 protobuf==6.33.0
 scikit_learn==1.7.2
-torch==2.6.0
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128
+torchvision==0.26.0+cu128
 tqdm==4.66.4
 wandb==0.22.2
 google-genai==1.33.0
@@ -16,3 +21,10 @@ seaborn==0.13.2
 openai
 nbformat>=5.0.0
 graphviz
+accelerate
+bitsandbytes
+peft
+sentencepiece
+transformers
+trl
+ipywidgets
