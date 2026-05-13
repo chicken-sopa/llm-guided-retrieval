@@ -1,9 +1,12 @@
 #@title `LanguageModelAPI`
 import asyncio
+import json
 import os
+import re
 import time
 import logging
 from copy import deepcopy
+from pathlib import Path
 from tqdm.auto import tqdm
 from abc import ABC
 from abc import abstractmethod
@@ -14,6 +17,7 @@ from collections import defaultdict, Counter
 
 from google import genai
 from google.genai.types import GenerateContentConfig
+from json_repair import repair_json
 from openai import AsyncOpenAI
 
 from utils import validate_genai_response_constraint
@@ -58,6 +62,146 @@ def _extract_openai_response_text(response: Any) -> str:
                     text_parts.append(content_text)
 
     return ''.join(text_parts).strip()
+
+
+def _resolve_log_file_path(logger: logging.Logger) -> Optional[Path]:
+    for handler in logger.handlers:
+        stream = getattr(handler, "stream", None)
+        stream_name = getattr(stream, "name", None)
+        if isinstance(stream_name, str) and stream_name not in {"<stderr>", "<stdout>"}:
+            return Path(stream_name)
+    return None
+
+
+def _build_local_api_call_logger(base_logger: logging.Logger) -> tuple[logging.Logger, Optional[Path]]:
+    logger_name = f"{base_logger.name}.local_model_api_calls"
+    api_logger = logging.getLogger(logger_name)
+    api_logger.setLevel(logging.INFO)
+    api_logger.propagate = False
+
+    while api_logger.handlers:
+        handler = api_logger.handlers.pop()
+        api_logger.removeHandler(handler)
+        handler.close()
+
+    base_log_path = _resolve_log_file_path(base_logger)
+    if base_log_path is None:
+        return api_logger, None
+
+    api_log_path = base_log_path.with_name(f"{base_log_path.stem}.local_model_api{base_log_path.suffix}")
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler = logging.FileHandler(api_log_path, mode='a', encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    api_logger.addHandler(file_handler)
+    return api_logger, api_log_path
+
+
+def _strip_markdown_json_fences(text: str) -> str:
+    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if fenced_match:
+        return fenced_match.group(1).strip()
+    return text.strip()
+
+
+def _extract_balanced_json_fragment(text: str) -> Optional[str]:
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = text.find(opener)
+        if start == -1:
+            continue
+
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == opener:
+                depth += 1
+            elif char == closer:
+                depth -= 1
+                if depth == 0:
+                    return text[start:index + 1].strip()
+    return None
+
+
+def _candidate_json_texts(text: str) -> List[str]:
+    candidates: List[str] = []
+    for candidate in (
+        text.strip(),
+        _strip_markdown_json_fences(text),
+        _extract_balanced_json_fragment(_strip_markdown_json_fences(text) or text),
+    ):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _schema_instruction(schema: Dict[str, Any]) -> str:
+    properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    required = schema.get("required", []) if isinstance(schema, dict) else []
+
+    field_descriptions = []
+    for field_name, field_schema in properties.items():
+        field_type = field_schema.get("type", "value") if isinstance(field_schema, dict) else "value"
+        requirement = "required" if field_name in required else "optional"
+        field_descriptions.append(f'"{field_name}" ({field_type}, {requirement})')
+
+    fields_text = ", ".join(field_descriptions) if field_descriptions else "the requested schema"
+    return (
+        "Return only one valid JSON object that matches the requested schema. "
+        "Do not include markdown fences, explanations, prose before the JSON, or prose after the JSON. "
+        f"The JSON must contain: {fields_text}."
+    )
+
+
+def _inject_schema_instruction(
+    messages: List[Dict[str, str]],
+    response_schema: Optional[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    if not response_schema:
+        return messages
+
+    instruction = _schema_instruction(response_schema)
+    updated_messages = [dict(message) for message in messages]
+
+    if updated_messages and updated_messages[0].get("role") == "system":
+        existing_content = updated_messages[0].get("content", "")
+        updated_messages[0]["content"] = f"{existing_content.rstrip()}\n\n{instruction}".strip()
+        return updated_messages
+
+    return [{"role": "system", "content": instruction}, *updated_messages]
+
+
+def _coerce_text_to_schema_json(response_text: str, constraint: Dict[str, Any]) -> str:
+    last_error = "response did not match the requested schema"
+
+    for candidate in _candidate_json_texts(response_text):
+        is_valid, error = validate_genai_response_constraint(candidate, constraint)
+        if is_valid:
+            return candidate.strip()
+        last_error = error
+
+        try:
+            repaired_object = repair_json(candidate, return_objects=True)
+            repaired_text = json.dumps(repaired_object, ensure_ascii=False)
+            is_valid, error = validate_genai_response_constraint(repaired_text, constraint)
+            if is_valid:
+                return repaired_text
+            last_error = error
+        except Exception as repair_error:
+            last_error = str(repair_error)
+
+    raise ValueError(f"Response does not conform to schema: {last_error}")
 
 class BatchMetrics:
     """Class to track batch processing metrics and errors."""
@@ -664,6 +808,187 @@ class OpenAIResponsesAPI(LanguageModelAPI):
     def update_config(self, **kwargs: Any) -> None:
         self.default_config.update(kwargs)
         self.logger.info(f"Updated config: {kwargs}")
+
+#@title `LocalModelAPI` implementation
+class LocalModelAPI(LanguageModelAPI):
+    """
+    Local in-process model implementation of the LanguageModelAPI.
+
+    This backend wraps a single locally loaded Hugging Face/PEFT model and exposes
+    it through the same async interface used by the remote API backends.
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        timeout: int = 60,
+        max_retries: int = 3,
+        logger: Optional[logging.Logger] = None,
+        adapter_path: Optional[str] = None,
+        use_4bit: bool = True,
+        enable_thinking: bool = False,
+        serialize_requests: bool = True,
+        log_api_calls: bool = False,
+        **kwargs: Any,
+    ):
+        super().__init__(model_name, api_key=None, timeout=timeout, max_retries=max_retries, logger=logger, **kwargs)
+
+        from llm_rl_playground.local_retrieval_model import load_local_retrieval_model
+
+        self.runtime = load_local_retrieval_model(
+            model_id=self.model_name,
+            adapter_path=adapter_path,
+            use_4bit=use_4bit,
+            enable_thinking=enable_thinking,
+        )
+        self.default_config: Dict[str, Any] = {}
+        self.serialize_requests = serialize_requests
+        self._request_lock = asyncio.Lock() if serialize_requests else None
+        self.log_api_calls = log_api_calls
+        self.api_call_logger, self.api_call_log_path = _build_local_api_call_logger(self.logger) if self.log_api_calls else (None, None)
+
+        self.logger.info(
+            "Initialized local model client with model: %s (adapter_path=%s, use_4bit=%s, serialize_requests=%s, log_api_calls=%s)",
+            self.model_name,
+            adapter_path,
+            use_4bit,
+            serialize_requests,
+            self.log_api_calls,
+        )
+        if self.log_api_calls and self.api_call_log_path is not None:
+            self.logger.info("Local model prompt/response log file: %s", self.api_call_log_path)
+
+    def _log_prompt_and_response(self, prompt: List[Dict[str, str]], response: str) -> None:
+        """
+        Write the local prompt and generated response to the active logger.
+
+        This uses a dedicated file logger so prompt/response dumps stay separate
+        from the main run log.
+        """
+        if not self.log_api_calls or self.api_call_logger is None:
+            return
+
+        try:
+            prompt_text = json.dumps(prompt, ensure_ascii=False, indent=2)
+        except Exception:
+            prompt_text = str(prompt)
+
+        self.api_call_logger.info(
+            "%s\nPrompt:\n%s\nResponse:\n%s\n%s",
+            "=" * 80,
+            prompt_text,
+            response,
+            "=" * 80,
+        )
+
+    def _format_prompt(self, prompt: Any) -> List[Dict[str, str]]:
+        """
+        Format prompt for the local model in chat-message form.
+
+        Args:
+            prompt: Can be a string or a list of chat messages.
+
+        Returns:
+            List of message dictionaries in chat format.
+        """
+        if isinstance(prompt, str):
+            return [{"role": "user", "content": prompt}]
+        if isinstance(prompt, list):
+            formatted_messages = []
+            for msg in prompt:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    formatted_messages.append(msg)
+                elif isinstance(msg, dict):
+                    formatted_messages.append({
+                        "role": msg.get("role", "user"),
+                        "content": msg.get("content", str(msg)),
+                    })
+                else:
+                    formatted_messages.append({"role": "user", "content": str(msg)})
+            return formatted_messages
+
+        self.logger.warning(f"Unexpected prompt type: {type(prompt)}, converting to string")
+        return [{"role": "user", "content": str(prompt)}]
+
+    async def _call_api(self, prompt: List[Dict[str, str]], **kwargs: Any) -> Any:
+        """
+        Run one local generation call in a worker thread so the async loop remains responsive.
+        """
+        config_params = {**self.default_config, **kwargs}
+        response_schema = config_params.get("response_schema")
+
+        # Remove framework-only parameters that are not generation arguments.
+        config_params.pop("max_retries", None)
+        config_params.pop("timeout", None)
+        config_params.pop("prompt_index", None)
+        config_params.pop("response_mime_type", None)
+        config_params.pop("response_schema", None)
+        config_params.pop("staggering_delay", None)
+        config_params.pop("print_summary_report", None)
+        config_params.pop("max_concurrent_calls", None)
+
+        max_new_tokens = config_params.pop("max_tokens", config_params.pop("max_new_tokens", 256))
+        default_temperature = 0.0 if response_schema else 0.7
+        default_top_p = 1.0 if response_schema else 0.9
+        temperature = config_params.pop("temperature", default_temperature)
+        top_p = config_params.pop("top_p", default_top_p)
+        enable_thinking = config_params.pop("enable_thinking", None)
+        thinking_config = config_params.pop("thinking_config", None)
+        if enable_thinking is None and thinking_config is not None:
+            thinking_budget = getattr(thinking_config, "thinking_budget", None)
+            enable_thinking = thinking_budget is None or thinking_budget != 0
+        if response_schema and enable_thinking is None:
+            enable_thinking = False
+
+        prompt = _inject_schema_instruction(prompt, response_schema)
+
+        async def _generate() -> str:
+            response = await asyncio.to_thread(
+                self.runtime.chat,
+                messages=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                enable_thinking=enable_thinking,
+            )
+            self._log_prompt_and_response(prompt, response)
+            return response
+
+        if self._request_lock is not None:
+            async with self._request_lock:
+                return await _generate()
+        return await _generate()
+
+    def _validate_and_parse_response(self, response: Any, **kwargs) -> str:
+        """
+        Validate and extract text from the local model response.
+        """
+        constraint = kwargs.get("response_schema", None)
+        try:
+            if not isinstance(response, str):
+                raise ValueError(f"Local model response must be a string, got {type(response)}")
+
+            text = response.strip()
+            if not text:
+                raise ValueError("Empty text in response")
+
+            if constraint:
+                text = _coerce_text_to_schema_json(text, constraint)
+
+            return text
+
+        except Exception as e:
+            preview = response[:500] if isinstance(response, str) else repr(response)
+            self.logger.debug(f"Failed to parse local response: {str(e)} | raw={preview}")
+            raise ValueError(f"Invalid local response format: {str(e)}")
+
+    def update_config(self, **kwargs: Any) -> None:
+        self.default_config.update(kwargs)
+        self.logger.info(f"Updated config: {kwargs}")
+
+    def unload(self) -> None:
+        """Release the in-process model runtime when the caller is done using it."""
+        self.runtime.unload()
 
 #@title `VllmAPI` implementation
 class VllmAPI(LanguageModelAPI):

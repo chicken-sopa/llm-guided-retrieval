@@ -41,7 +41,20 @@ def compress_hparam_string(hparam_str: str) -> str:
     return final_str
 
 class HyperParams(argparse.Namespace):
-    NO_SAVE_VARS = set(['dataset', 'rerank', 'load_existing', 'llm_max_concurrent_calls', 'num_threads', 'search_with_path_relevance', 'llm_api_timeout', 'llm_api_max_retries', 'llm_api_staggering_delay'])
+    NO_SAVE_VARS = set([
+        'dataset',
+        'rerank',
+        'load_existing',
+        'llm_max_concurrent_calls',
+        'num_threads',
+        'search_with_path_relevance',
+        'llm_api_timeout',
+        'llm_api_max_retries',
+        'llm_api_staggering_delay',
+        'local_adapter_path',
+        'local_use_4bit',
+        'local_serialize_requests',
+    ])
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -79,6 +92,9 @@ class HyperParams(argparse.Namespace):
         parser.add_argument('--llm_api_timeout', type=int, default=120)
         parser.add_argument('--llm_api_max_retries', type=int, default=4)
         parser.add_argument('--llm_api_staggering_delay', type=float, default=0.1)
+        parser.add_argument('--local_adapter_path', type=str, default=None)
+        parser.add_argument('--local_use_4bit', default=True, action=argparse.BooleanOptionalAction)
+        parser.add_argument('--local_serialize_requests', default=True, action=argparse.BooleanOptionalAction)
         parser.add_argument('--num_iters', type=int, default=20)
         parser.add_argument('--num_eval_samples', type=int, default=1_000)
         parser.add_argument('--max_beam_size', type=int, default=2)

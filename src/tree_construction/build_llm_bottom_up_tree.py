@@ -48,7 +48,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from llm_apis import GenAIAPI, OpenAIResponsesAPI, VllmAPI
+from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
 from utils import setup_logger
 
 SUMMARY_RESPONSE_SCHEMA = {
@@ -307,6 +307,16 @@ class ClusterSummarizer:
                 max_retries=self.args.llm_api_max_retries,
                 base_url=self.args.vllm_base_url,
             )
+        elif self.args.llm_api_backend in {"local", "localModel"}:
+            api = LocalModelAPI(
+                self.args.llm,
+                logger=self.logger,
+                timeout=self.args.llm_api_timeout,
+                max_retries=self.args.llm_api_max_retries,
+                adapter_path=self.args.local_adapter_path,
+                use_4bit=self.args.local_use_4bit,
+                serialize_requests=self.args.local_serialize_requests,
+            )
         else:
             raise ValueError(f"Unknown llm_api_backend: {self.args.llm_api_backend}")
 
@@ -318,6 +328,8 @@ class ClusterSummarizer:
             "print_summary_report": False,
             "temperature": 0,
         }
+        if self.args.llm_api_backend in {"local", "localModel"} and self.args.local_serialize_requests:
+            llm_api_kwargs["max_concurrent_calls"] = 1
         return api, llm_api_kwargs
 
     def summarize_clusters(
@@ -777,7 +789,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-cache", help="Optional JSON cache path for cluster summaries.")
     parser.add_argument(
         "--llm-api-backend",
-        choices=["openai", "genai", "vllm"],
+        choices=["openai", "genai", "vllm", "local", "localModel"],
         default="openai",
         help="LLM backend used for cluster summaries.",
     )
@@ -787,6 +799,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-api-max-retries", type=int, default=4)
     parser.add_argument("--llm-api-staggering-delay", type=float, default=0.05)
     parser.add_argument("--vllm-base-url", default="http://localhost:8000/v1")
+    parser.add_argument("--local-adapter-path")
+    parser.add_argument("--local-use-4bit", default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--local-serialize-requests", default=True, action=argparse.BooleanOptionalAction)
 
     return parser.parse_args()
 

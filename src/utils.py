@@ -266,13 +266,19 @@ def recursive_key_search(obj, key):
 import re
 def post_process(output, return_json=False, extract_key=None):
   try:
+    if output is None:
+      return None
+
+    output_text = output['response'] if isinstance(output, dict) else output
+    if isinstance(output_text, str) and output_text.lstrip().startswith('Error:'):
+      return None
+
     if return_json:
       try:
-        return json.loads(output)
+        return json.loads(output_text)
       except json.JSONDecodeError:
         pass
 
-    output_text = output['response'] if isinstance(output, dict) else output
     if '```json' in output_text:
       output_text = re.findall(r"(?:```json\s*)(.+)(?:```)", output_text, re.DOTALL)[-1]
     output_json = repair_json(output_text, return_objects=True)
