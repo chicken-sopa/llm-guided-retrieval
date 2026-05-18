@@ -942,7 +942,8 @@ class LocalModelAPI(LanguageModelAPI):
         )
         self.default_config: Dict[str, Any] = {}
         self.serialize_requests = serialize_requests
-        self._request_lock = asyncio.Lock() if serialize_requests else None
+        self._request_lock: Optional[asyncio.Lock] = None
+        self._request_lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self.log_api_calls = log_api_calls
         self.api_call_logger, self.api_call_log_path = _build_api_call_logger(
             self.logger,
@@ -983,6 +984,23 @@ class LocalModelAPI(LanguageModelAPI):
             response,
             "=" * 80,
         )
+
+    def _get_request_lock(self) -> Optional[asyncio.Lock]:
+        """
+        Return a lock bound to the currently running event loop.
+
+        Notebook environments like Colab can recreate the event loop between
+        cells, so a lock created once in `__init__` may later belong to the
+        wrong loop and raise `is bound to a different event loop`.
+        """
+        if not self.serialize_requests:
+            return None
+
+        current_loop = asyncio.get_running_loop()
+        if self._request_lock is None or self._request_lock_loop is not current_loop:
+            self._request_lock = asyncio.Lock()
+            self._request_lock_loop = current_loop
+        return self._request_lock
 
     def _format_prompt(self, prompt: Any) -> List[Dict[str, str]]:
         """
@@ -1057,8 +1075,9 @@ class LocalModelAPI(LanguageModelAPI):
             self._log_prompt_and_response(prompt, response)
             return response
 
-        if self._request_lock is not None:
-            async with self._request_lock:
+        request_lock = self._get_request_lock()
+        if request_lock is not None:
+            async with request_lock:
                 return await _generate()
         return await _generate()
 
