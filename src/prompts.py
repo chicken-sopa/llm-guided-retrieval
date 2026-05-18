@@ -18,6 +18,7 @@ TREE_TRAVERSAL_PROMPT_V5_CLUSTER = '''You are an intelligent search agent naviga
 ## CANDIDATES
 
 Here are the candidates, each is identified by a unique `node_id` provided at the very start in [] (e.g., [0]).
+Valid candidate IDs for this request: {valid_candidate_ids}. Do not output any candidate ID that is not in this list.
 
 {child_node_options}
 
@@ -33,10 +34,14 @@ Here are the candidates, each is identified by a unique `node_id` provided at th
 
 ## OUTPUT FORMAT
 You must provide your response as a single, clean JSON object. The JSON should have three keys: `reasoning`, `ranking`, and `relevance_scores`.
+Do not add any other keys. Do not replace these keys with topic names, labels, or prose.
 
 * `reasoning`: This must be a **string**.
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
-* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. For example: [[0, 85], [1, 92], [2, 73]].
+* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 85]].
+
+Required JSON shape:
+{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 85]]}}
 
 ---
 
@@ -60,6 +65,7 @@ TREE_TRAVERSAL_PROMPT_V5_LEAF = '''You are an intelligent search agent evaluatin
 ## CANDIDATES
 
 Here are the candidates, each is identified by a unique `node_id` provided at the very start in [] (e.g., [0]).
+Valid candidate IDs for this request: {valid_candidate_ids}. Do not output any candidate ID that is not in this list.
 
 {child_node_options}
 
@@ -77,10 +83,14 @@ Here are the candidates, each is identified by a unique `node_id` provided at th
 
 ## OUTPUT FORMAT
 You must provide your response as a single, clean JSON object. The JSON should have three keys: `reasoning`, `ranking`, and `relevance_scores`.
+Do not add any other keys. Do not replace these keys with topic names, labels, or prose.
 
 * `reasoning`: This must be a **string**.
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
-* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. For example: [[0, 85], [1, 92], [2, 73]].
+* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 85]].
+
+Required JSON shape:
+{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 85]]}}
 
 ---
 
@@ -180,7 +190,8 @@ def get_traversal_prompt(query, child_desc_list, hp, logger, return_constraint=T
   while True:
     args = {
         'query': query.replace('\n','  '),
-        'child_node_options': get_desc_str_from_list(child_desc_list, max_desc_char_len)
+        'child_node_options': get_desc_str_from_list(child_desc_list, max_desc_char_len),
+        'valid_candidate_ids': ', '.join(str(i) for i in range(len(child_desc_list))) or 'none',
     }
 
     args['relevance_defintion'] = relevance_definition

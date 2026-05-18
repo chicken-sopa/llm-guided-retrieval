@@ -64,8 +64,10 @@ def render_messages_as_text(messages: list[dict[str, str]]) -> str:
 
 
 def is_processor_first_model(model_id: str) -> bool:
-    """Gemma 4 and similar newer multimodal checkpoints prefer AutoProcessor over AutoTokenizer."""
+    """Use AutoProcessor for multimodal Gemma 4 checkpoints, but keep text-only repacks on the tokenizer path."""
     model_name = model_id.lower()
+    if "text-only" in model_name:
+        return False
     return "gemma-4" in model_name
 
 

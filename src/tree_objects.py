@@ -386,8 +386,34 @@ class InferSample(object):
 
       reasoning = recursive_key_search(response_json, 'reasoning')
       relevance_scores = recursive_key_search(response_json, 'relevance_scores')
+      ranking = recursive_key_search(response_json, 'ranking')
+      if relevance_scores is None and ranking is not None:
+        relevance_scores = [[idx, 100 / np.log2(rank + 2)] for rank, idx in enumerate(ranking)]
+      if relevance_scores is None and len(slate) == 1:
+        self.logger.warning(f'Missing relevance_scores for single-candidate slate; defaulting to candidate 0. Response: {response_json}')
+        relevance_scores = [[0, 50]]
+      parsed_relevance_scores = {}
       try:
-        relevance_scores = {slate[int(k)]: float(v)/100 for k, v in relevance_scores}
+        for item in relevance_scores or []:
+          if not isinstance(item, (list, tuple)) or len(item) != 2:
+            self.logger.warning(f'Ignoring malformed relevance score item: {item}')
+            continue
+
+          k, v = item
+          try:
+            candidate_idx = int(k)
+            score = float(v) / 100
+          except (TypeError, ValueError) as e:
+            self.logger.warning(f'Ignoring unparsable relevance score item: {item} with error {e}')
+            continue
+
+          if candidate_idx < 0 or candidate_idx >= len(slate):
+            self.logger.warning(f'Ignoring out-of-range relevance score id {candidate_idx}; slate length is {len(slate)}, slate: {slate}')
+            continue
+
+          parsed_relevance_scores[slate[candidate_idx]] = min(max(score, 0.0), 1.0)
+
+        relevance_scores = parsed_relevance_scores
       except Exception as e:
         self.logger.error(f'Error parsing relevance scores: {relevance_scores}, slate: {slate} with error {e}')
         relevance_scores = None

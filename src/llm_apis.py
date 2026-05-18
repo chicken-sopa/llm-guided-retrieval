@@ -73,8 +73,12 @@ def _resolve_log_file_path(logger: logging.Logger) -> Optional[Path]:
     return None
 
 
-def _build_local_api_call_logger(base_logger: logging.Logger) -> tuple[logging.Logger, Optional[Path]]:
-    logger_name = f"{base_logger.name}.local_model_api_calls"
+def _build_api_call_logger(
+    base_logger: logging.Logger,
+    logger_name_suffix: str,
+    file_suffix: str,
+) -> tuple[logging.Logger, Optional[Path]]:
+    logger_name = f"{base_logger.name}.{logger_name_suffix}"
     api_logger = logging.getLogger(logger_name)
     api_logger.setLevel(logging.INFO)
     api_logger.propagate = False
@@ -88,7 +92,7 @@ def _build_local_api_call_logger(base_logger: logging.Logger) -> tuple[logging.L
     if base_log_path is None:
         return api_logger, None
 
-    api_log_path = base_log_path.with_name(f"{base_log_path.stem}.local_model_api{base_log_path.suffix}")
+    api_log_path = base_log_path.with_name(f"{base_log_path.stem}.{file_suffix}{base_log_path.suffix}")
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     file_handler = logging.FileHandler(api_log_path, mode='a', encoding='utf-8')
     file_handler.setFormatter(formatter)
@@ -182,7 +186,59 @@ def _inject_schema_instruction(
     return [{"role": "system", "content": instruction}, *updated_messages]
 
 
-def _coerce_text_to_schema_json(response_text: str, constraint: Dict[str, Any]) -> str:
+def _schema_requires_traversal_fields(constraint: Dict[str, Any]) -> bool:
+    required = set(constraint.get("required", [])) if isinstance(constraint, dict) else set()
+    return {"reasoning", "ranking", "relevance_scores"}.issubset(required)
+
+
+def _valid_candidate_ids_from_prompt(prompt: Any) -> List[int]:
+    if isinstance(prompt, list):
+        prompt_text = "\n".join(str(message.get("content", message)) for message in prompt)
+    else:
+        prompt_text = str(prompt)
+
+    match = re.search(r"Valid candidate IDs for this request:\s*([^\n.]+)", prompt_text)
+    if not match:
+        return []
+
+    return [int(x) for x in re.findall(r"\d+", match.group(1))]
+
+
+def _fallback_traversal_json(response_text: str, valid_candidate_ids: List[int]) -> Optional[str]:
+    if len(valid_candidate_ids) != 1:
+        return None
+
+    candidate_id = valid_candidate_ids[0]
+    score = 50
+    try:
+        repaired_object = repair_json(response_text, return_objects=True)
+        for value in repaired_object.values() if isinstance(repaired_object, dict) else []:
+            if isinstance(value, (int, float)) and 0 <= value <= 1:
+                score = round(float(value) * 100)
+                break
+            if isinstance(value, (int, float)) and 1 < value <= 100:
+                score = round(float(value))
+                break
+    except Exception:
+        repaired_object = response_text
+
+    fallback = {
+        "reasoning": (
+            "Local model did not return the required traversal JSON. "
+            f"Using the only valid candidate ID {candidate_id} as a fallback. "
+            f"Raw response: {str(repaired_object)[:500]}"
+        ),
+        "ranking": [candidate_id],
+        "relevance_scores": [[candidate_id, int(max(0, min(100, score)))]],
+    }
+    return json.dumps(fallback, ensure_ascii=False)
+
+
+def _coerce_text_to_schema_json(
+    response_text: str,
+    constraint: Dict[str, Any],
+    prompt: Any = None,
+) -> str:
     last_error = "response did not match the requested schema"
 
     for candidate in _candidate_json_texts(response_text):
@@ -200,6 +256,14 @@ def _coerce_text_to_schema_json(response_text: str, constraint: Dict[str, Any]) 
             last_error = error
         except Exception as repair_error:
             last_error = str(repair_error)
+
+    if _schema_requires_traversal_fields(constraint):
+        fallback_text = _fallback_traversal_json(response_text, _valid_candidate_ids_from_prompt(prompt))
+        if fallback_text:
+            is_valid, error = validate_genai_response_constraint(fallback_text, constraint)
+            if is_valid:
+                return fallback_text
+            last_error = error
 
     raise ValueError(f"Response does not conform to schema: {last_error}")
 
@@ -408,7 +472,11 @@ class LanguageModelAPI(ABC):
                         self._call_api(formatted_prompt, **kwargs),
                         timeout=timeout
                     )
-                    processed_response = self._validate_and_parse_response(raw_response, **kwargs)
+                    processed_response = self._validate_and_parse_response(
+                        raw_response,
+                        _formatted_prompt=formatted_prompt,
+                        **kwargs,
+                    )
 
                     # Record the successful interaction in history
                     history_record = {
@@ -733,6 +801,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         timeout: int = 60,
         max_retries: int = 3,
         logger: Optional[logging.Logger] = None,
+        log_api_calls: bool = False,
         **kwargs: Any,
     ):
         if api_key is None:
@@ -744,8 +813,37 @@ class OpenAIResponsesAPI(LanguageModelAPI):
 
         self.client = AsyncOpenAI(api_key=self.api_key, timeout=self.timeout)
         self.default_config = {}
+        self.log_api_calls = log_api_calls
+        self.api_call_logger, self.api_call_log_path = _build_api_call_logger(
+            self.logger,
+            logger_name_suffix="openai_api_calls",
+            file_suffix="openai_api",
+        ) if self.log_api_calls else (None, None)
 
-        self.logger.info(f"Initialized OpenAI Responses client with model: {self.model_name}")
+        self.logger.info(
+            "Initialized OpenAI Responses client with model: %s (log_api_calls=%s)",
+            self.model_name,
+            self.log_api_calls,
+        )
+        if self.log_api_calls and self.api_call_log_path is not None:
+            self.logger.info("OpenAI prompt/response log file: %s", self.api_call_log_path)
+
+    def _log_prompt_and_response(self, prompt: Any, response_text: str) -> None:
+        if not self.log_api_calls or self.api_call_logger is None:
+            return
+
+        try:
+            prompt_text = json.dumps(prompt, ensure_ascii=False, indent=2)
+        except Exception:
+            prompt_text = str(prompt)
+
+        self.api_call_logger.info(
+            "%s\nPrompt:\n%s\nResponse:\n%s\n%s",
+            "=" * 80,
+            prompt_text,
+            response_text,
+            "=" * 80,
+        )
 
     def _format_prompt(self, prompt: Any) -> Any:
         if isinstance(prompt, str):
@@ -779,6 +877,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
 
         try:
             response = await self.client.responses.create(**request_params)
+            self._log_prompt_and_response(prompt, _extract_openai_response_text(response))
             return response
         except Exception as e:
             self.logger.debug(f"OpenAI Responses API call failed: {str(e)}")
@@ -845,7 +944,11 @@ class LocalModelAPI(LanguageModelAPI):
         self.serialize_requests = serialize_requests
         self._request_lock = asyncio.Lock() if serialize_requests else None
         self.log_api_calls = log_api_calls
-        self.api_call_logger, self.api_call_log_path = _build_local_api_call_logger(self.logger) if self.log_api_calls else (None, None)
+        self.api_call_logger, self.api_call_log_path = _build_api_call_logger(
+            self.logger,
+            logger_name_suffix="local_model_api_calls",
+            file_suffix="local_model_api",
+        ) if self.log_api_calls else (None, None)
 
         self.logger.info(
             "Initialized local model client with model: %s (adapter_path=%s, use_4bit=%s, serialize_requests=%s, log_api_calls=%s)",
@@ -973,7 +1076,11 @@ class LocalModelAPI(LanguageModelAPI):
                 raise ValueError("Empty text in response")
 
             if constraint:
-                text = _coerce_text_to_schema_json(text, constraint)
+                text = _coerce_text_to_schema_json(
+                    text,
+                    constraint,
+                    prompt=kwargs.get("_formatted_prompt"),
+                )
 
             return text
 
