@@ -14,11 +14,27 @@ DEFAULT_MODEL_ID = "google/gemma-2-2b-it"
 DEFAULT_ADAPTER_PATH = Path(__file__).resolve().parent / "outputs" / "gemma-2-2b-it-qlora"
 
 
+def is_mps_available() -> bool:
+    """Return whether Apple Silicon MPS acceleration is available."""
+    return bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available()
+
+
+def preferred_device_type() -> str:
+    """Pick the best available runtime device."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if is_mps_available():
+        return "mps"
+    return "cpu"
+
+
 def resolve_compute_dtype() -> torch.dtype:
     """Pick the safest dtype for the available device."""
     if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
         return torch.bfloat16
     if torch.cuda.is_available():
+        return torch.float16
+    if is_mps_available():
         return torch.float16
     return torch.float32
 
@@ -33,14 +49,16 @@ def build_quantization_config(compute_dtype: torch.dtype) -> BitsAndBytesConfig:
     )
 
 
-def clear_cuda_memory() -> None:
-    """Release unused CUDA cache after unloading model objects."""
+def clear_accelerator_memory() -> None:
+    """Release unused accelerator cache after unloading model objects."""
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if is_mps_available():
+        torch.mps.empty_cache()
 
 
-def default_device_map() -> dict[str, int] | None:
+def cuda_device_map() -> dict[str, int] | None:
     """Place the whole model on GPU 0 when CUDA is available."""
     if not torch.cuda.is_available():
         return None
@@ -106,6 +124,7 @@ class LocalRetrievalModelRuntime:
     adapter_path: str | Path | None = DEFAULT_ADAPTER_PATH
     use_4bit: bool = True
     enable_thinking: bool = False
+    device_type: str = field(default_factory=preferred_device_type, init=False)
     processor: Any | None = field(default=None, init=False)
     tokenizer: Any | None = field(default=None, init=False)
     model: Any | None = field(default=None, init=False)
@@ -119,6 +138,13 @@ class LocalRetrievalModelRuntime:
         if adapter_path.exists():
             return adapter_path
         return None
+
+    @property
+    def device(self) -> torch.device:
+        """Return the live model device when loaded, otherwise the preferred target device."""
+        if self.model is not None:
+            return _model_device(self.model)
+        return torch.device(self.device_type)
 
     def load(self) -> "LocalRetrievalModelRuntime":
         """
@@ -145,10 +171,10 @@ class LocalRetrievalModelRuntime:
             "low_cpu_mem_usage": True,
         }
 
-        if torch.cuda.is_available():
+        if self.device_type == "cuda":
             if self.use_4bit:
                 model_kwargs["quantization_config"] = build_quantization_config(self.compute_dtype)
-            model_kwargs["device_map"] = default_device_map()
+            model_kwargs["device_map"] = cuda_device_map()
 
         base_model = AutoModelForCausalLM.from_pretrained(
             self.model_id,
@@ -161,6 +187,9 @@ class LocalRetrievalModelRuntime:
             self.model = PeftModel.from_pretrained(base_model, str(adapter_path))
         else:
             self.model = base_model
+
+        if self.device_type == "mps":
+            self.model = self.model.to("mps")
 
         self.model.eval()
         return self
@@ -176,7 +205,7 @@ class LocalRetrievalModelRuntime:
         if self.processor is not None:
             del self.processor
             self.processor = None
-        clear_cuda_memory()
+        clear_accelerator_memory()
 
     def prepare_prompt(self, messages: list[dict[str, str]]) -> dict[str, torch.Tensor]:
         """
