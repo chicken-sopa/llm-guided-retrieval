@@ -1,0 +1,159 @@
+ECtHR Tree-Traversal LoRA/QLoRA Multi-GPU Training Script
+=========================================================
+
+Script:
+  src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py
+
+What it trains:
+  The script fine-tunes a small local model to make LATTICE-style tree traversal
+  decisions for ECtHR alleged-violation prediction.
+
+  Each training example looks like:
+    case facts + current tree path + child semantic summaries
+      -> JSON ranking of which child nodes to follow
+
+  The gold paths are built from:
+    AUEB-NLP/ecthr_cases
+    config: alleged-violation-prediction
+
+
+Basic Usage
+-----------
+
+Run from the repo root:
+
+  cd C:\Users\jmgil\Desktop\TESE\LATTICE\llm-guided-retrieval
+
+Single GPU:
+
+  python src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py
+
+Two GPUs:
+
+  torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py
+
+Four GPUs:
+
+  torchrun --nproc_per_node=4 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py
+
+
+Tiny Smoke Test
+---------------
+
+Use this first to check that the whole pipeline works:
+
+  torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --max-train-cases 8 --max-train-examples 24 --max-eval-cases 4 --max-eval-examples 12 --num-train-epochs 0.25
+
+
+Run Training + ECtHR Batched Evaluation
+---------------------------------------
+
+This runs training, saves the adapter, then evaluates the trained adapter with
+the reusable EcthrTraversalEvaluator:
+
+  torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --max-train-cases 8 --max-train-examples 24 --max-eval-cases 4 --max-eval-examples 12 --num-train-epochs 0.25 --run-ecthr-batched-eval --ecthr-eval-n-cases 2 --ecthr-eval-num-iters 3 --ecthr-eval-top-k-leaves 6
+
+Compare trained adapter against the base model:
+
+  torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --run-ecthr-batched-eval --compare-base-model
+
+
+Important Flags
+---------------
+
+Model:
+  --model-id Qwen/Qwen2.5-1.5B-Instruct
+
+Output adapter directory:
+  --output-dir outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora
+
+Dataset:
+  --ecthr-dataset AUEB-NLP/ecthr_cases
+  --ecthr-config alleged-violation-prediction
+  --train-split train
+  --eval-split validation
+
+Training size:
+  --max-train-cases 1500
+  --max-train-examples 8000
+  --max-eval-cases 200
+  --max-eval-examples 1000
+  --max-examples-per-case 8
+
+Training hyperparameters:
+  --num-train-epochs 1.0
+  --learning-rate 2e-4
+  --per-device-train-batch-size 1
+  --gradient-accumulation-steps 8
+  --max-length 2048
+
+LoRA:
+  --lora-r 16
+  --lora-alpha 16
+  --lora-dropout 0.05
+
+QLoRA:
+  QLoRA 4-bit training is enabled by default.
+
+  Disable 4-bit and use regular LoRA:
+    --no-use-4bit
+
+Evaluation:
+  --run-ecthr-batched-eval
+  --compare-base-model
+  --ecthr-eval-n-cases 5
+  --ecthr-eval-start 0
+  --ecthr-eval-num-iters 6
+  --ecthr-eval-top-k-leaves 10
+  --ecthr-eval-prediction-min-score 0.4
+  --ecthr-eval-use-llm-selector
+
+
+Resume Training
+---------------
+
+Resume from a Trainer checkpoint:
+
+  torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --resume-from-checkpoint src\llm_rl_playground\outputs\qwen2.5-1.5b-ecthr-tree-traversal-lora\checkpoint-XXX
+
+
+Outputs
+-------
+
+The script saves a PEFT LoRA adapter, not a full merged model.
+
+Default output:
+  src\llm_rl_playground\outputs\qwen2.5-1.5b-ecthr-tree-traversal-lora
+
+Typical adapter files:
+  adapter_config.json
+  adapter_model.safetensors
+  tokenizer.json
+  tokenizer_config.json
+
+If ECtHR batched evaluation is enabled, it also saves:
+  trained_tree_traversal_adapter_ecthr_eval_rows.json
+  trained_tree_traversal_adapter_ecthr_eval_results.json
+  ecthr_batched_eval_comparison.csv
+
+If --compare-base-model is enabled, it also saves:
+  base_model_no_adapter_ecthr_eval_rows.json
+  base_model_no_adapter_ecthr_eval_results.json
+
+
+Notes
+-----
+
+1. Multi-GPU training should be launched with torchrun, not from a normal notebook cell.
+
+2. The script uses one process per GPU. For QLoRA, each process loads the model
+   onto its own GPU using LOCAL_RANK and device_map={"": local_rank}.
+
+3. Start with the tiny smoke test before running a full training job.
+
+4. Keep --run-ecthr-batched-eval off during long training if you only want the
+   adapter. Turn it on when you want immediate retrieval-quality feedback.
+
+5. Keep --ecthr-eval-use-llm-selector off if you want to measure the traversal
+   adapter itself. Turning it on adds a final article-selection LLM step.
+
