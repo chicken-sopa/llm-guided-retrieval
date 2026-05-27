@@ -5,8 +5,6 @@ import gc
 import json
 import os
 import pickle
-import random
-import re
 import sys
 from pathlib import Path
 
@@ -22,11 +20,14 @@ from transformers import (
     TrainingArguments,
 )
 
-
-TREE_ARTICLE_RE = re.compile(
-    r"(?:Protocol\s+(?P<protocol>\d+)\s+)?Art\.\s*(?P<article>\d+[A-Za-z]?)",
-    flags=re.IGNORECASE,
-)
+try:
+    from llm_rl_playground.ecthr_training_utils import (
+        annotate_subtree_articles,
+        build_traversal_rows,
+        load_json_tree,
+    )
+except ModuleNotFoundError:
+    from ecthr_training_utils import annotate_subtree_articles, build_traversal_rows, load_json_tree
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,294 +112,6 @@ def local_rank() -> int:
 
 def world_size() -> int:
     return int(os.environ.get("WORLD_SIZE", "1"))
-
-
-def clean_space(value) -> str:
-    return " ".join(str(value or "").split())
-
-
-def normalize_article_label(value) -> str | None:
-    if value is None:
-        return None
-    s = str(value).strip().lower()
-    if not s:
-        return None
-
-    s = s.replace("no violation", "")
-    s = s.replace("non violation", "")
-    s = s.replace("non-violation", "")
-    s = s.replace(".", "")
-    s = s.replace("-", "_")
-    s = re.sub(r"\s+", "_", s)
-    s = re.sub(r"^echr_", "", s)
-    s = re.sub(r"^convention_", "", s)
-
-    if re.fullmatch(r"\d+[a-z]?", s):
-        return f"article_{s}"
-
-    match = re.fullmatch(r"p(\d+)_(\d+)", s)
-    if match:
-        return f"protocol_{int(match.group(1))}_article_{int(match.group(2))}"
-
-    match = re.search(r"article_?(\d+[a-z]?)_(?:of_)?protocol_?(\d+)", s)
-    if match:
-        return f"protocol_{int(match.group(2))}_article_{match.group(1)}"
-
-    match = re.search(r"protocol_?(\d+)_article_?(\d+[a-z]?)", s)
-    if match:
-        return f"protocol_{int(match.group(1))}_article_{match.group(2)}"
-
-    match = re.search(r"article_?(\d+[a-z]?)", s)
-    if match:
-        return f"article_{match.group(1)}"
-
-    return None
-
-
-def article_id_to_display(article_id: str) -> str:
-    match = re.fullmatch(r"article_(\d+[a-z]?)", article_id)
-    if match:
-        return f"Article {match.group(1).upper()}"
-
-    match = re.fullmatch(r"protocol_(\d+)_article_(\d+[a-z]?)", article_id)
-    if match:
-        return f"Protocol {match.group(1)}, Article {match.group(2).upper()}"
-
-    return article_id
-
-
-def extract_articles_from_tree_text(text: str) -> set[str]:
-    articles = set()
-    for match in TREE_ARTICLE_RE.finditer(text or ""):
-        article = match.group("article").lower()
-        protocol = match.group("protocol")
-        if protocol:
-            articles.add(f"protocol_{int(protocol)}_article_{article}")
-        else:
-            articles.add(f"article_{article}")
-    return articles
-
-
-def example_gold_articles(example: dict, label_column: str = "labels") -> list[str]:
-    raw_labels = example.get(label_column, [])
-    if raw_labels is None:
-        return []
-    if isinstance(raw_labels, (int, str)):
-        raw_labels = [raw_labels]
-
-    normalized = []
-    for raw_label in raw_labels:
-        article_id = normalize_article_label(raw_label)
-        if article_id and article_id not in normalized:
-            normalized.append(article_id)
-    return sorted(normalized)
-
-
-def facts_to_text(example: dict, max_chars: int) -> str:
-    facts = example.get("text") or example.get("facts") or []
-    if isinstance(facts, str):
-        fact_text = facts
-    else:
-        fact_text = "\n".join(f"- {clean_space(fact)}" for fact in facts if clean_space(fact))
-    if len(fact_text) > max_chars:
-        fact_text = fact_text[:max_chars] + "\n- [facts truncated]"
-    return fact_text
-
-
-def node_label(node: dict) -> str:
-    meta = node.get("metadata") or {}
-    payload = meta.get("summary_payload") or {}
-    return clean_space(payload.get("label") or meta.get("label") or node.get("id") or "node")
-
-
-def load_tree(tree_path: Path) -> dict:
-    with tree_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def annotate_subtree_articles(node: dict) -> set[str]:
-    children = node.get("child") or []
-    if not children:
-        articles = extract_articles_from_tree_text(node.get("desc", ""))
-    else:
-        articles = set()
-        for child in children:
-            articles |= annotate_subtree_articles(child)
-    node["_subtree_articles"] = sorted(articles)
-    return articles
-
-
-def format_child_options(children: list[dict], max_child_desc_chars: int) -> str:
-    parts = []
-    for idx, child in enumerate(children):
-        desc = clean_space(child.get("desc"))[:max_child_desc_chars]
-        parts.append(f"[{idx}]. {desc}")
-    return "\n\n".join(parts)
-
-
-def format_current_path(path_labels: list[str], max_path_chars: int) -> str:
-    text = " -> ".join(path_labels)
-    if len(text) > max_path_chars:
-        text = text[-max_path_chars:]
-    return text or "ROOT"
-
-
-def build_traversal_prompt(
-    facts: str,
-    path_labels: list[str],
-    children: list[dict],
-    *,
-    max_child_desc_chars: int,
-    max_path_chars: int,
-) -> str:
-    valid_ids = ", ".join(str(i) for i in range(len(children)))
-    return f"""You are an intelligent search agent navigating a hierarchical semantic tree of European Convention law.
-
-Given the facts of an ECtHR case, choose the child nodes most likely to lead to the Convention or Protocol articles alleged by the applicant.
-
-Relevance definition:
-A child node is relevant when its subtree is a strong legal path toward an article that could be alleged from the case facts. Penalize nodes that are only background, procedural context, or weakly related.
-
-Case facts:
-{facts}
-
-Current tree path:
-{format_current_path(path_labels, max_path_chars)}
-
-Candidate child nodes:
-Valid candidate IDs for this request: {valid_ids}.
-
-{format_child_options(children, max_child_desc_chars)}
-
-Return one clean JSON object with exactly these keys: reasoning, ranking, relevance_scores.
-The ranking must include only valid candidate IDs, ordered from most to least relevant.
-The relevance_scores field must be an array of [candidate_id, score] pairs with scores from 0 to 100."""
-
-
-def make_traversal_answer(positive_ids: list[int], children: list[dict], gold_articles: set[str]) -> dict:
-    positive_set = set(positive_ids)
-    ranking = list(positive_ids) + [idx for idx in range(len(children)) if idx not in positive_set]
-    scores = [[idx, 95 if idx in positive_set else 15] for idx in ranking]
-    selected_labels = [node_label(children[idx]) for idx in positive_ids]
-    gold_display = [article_id_to_display(article_id) for article_id in sorted(gold_articles)]
-    return {
-        "reasoning": (
-            "The top-ranked child nodes are on oracle paths from the case facts to the alleged article labels. "
-            f"Selected child labels: {selected_labels}. Alleged labels: {gold_display}."
-        ),
-        "ranking": ranking,
-        "relevance_scores": scores,
-    }
-
-
-def collect_case_traversal_examples(
-    node: dict,
-    *,
-    facts: str,
-    gold_articles: set[str],
-    path_labels: list[str],
-    rows: list[dict],
-    include_single_child_nodes: bool,
-    max_child_desc_chars: int,
-    max_path_chars: int,
-) -> None:
-    children = node.get("child") or []
-    if not children:
-        return
-
-    positive_ids = [
-        idx
-        for idx, child in enumerate(children)
-        if set(child.get("_subtree_articles") or []) & gold_articles
-    ]
-    if not positive_ids:
-        return
-
-    if include_single_child_nodes or len(children) > 1:
-        prompt = build_traversal_prompt(
-            facts=facts,
-            path_labels=path_labels,
-            children=children,
-            max_child_desc_chars=max_child_desc_chars,
-            max_path_chars=max_path_chars,
-        )
-        answer = make_traversal_answer(positive_ids, children, gold_articles)
-        rows.append(
-            {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are an ECtHR semantic-tree traversal model. Return only valid JSON.",
-                    },
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)},
-                ]
-            }
-        )
-
-    next_path = path_labels + [node_label(node)]
-    for idx in positive_ids:
-        collect_case_traversal_examples(
-            children[idx],
-            facts=facts,
-            gold_articles=gold_articles,
-            path_labels=next_path,
-            rows=rows,
-            include_single_child_nodes=include_single_child_nodes,
-            max_child_desc_chars=max_child_desc_chars,
-            max_path_chars=max_path_chars,
-        )
-
-
-def make_examples_for_case(example: dict, tree: dict, all_tree_articles: set[str], args: argparse.Namespace, rng: random.Random) -> list[dict]:
-    gold_articles = set(example_gold_articles(example))
-    gold_articles &= all_tree_articles
-    if not gold_articles:
-        return []
-
-    rows = []
-    collect_case_traversal_examples(
-        tree,
-        facts=facts_to_text(example, args.max_fact_chars),
-        gold_articles=gold_articles,
-        path_labels=["ROOT"],
-        rows=rows,
-        include_single_child_nodes=args.include_single_child_nodes,
-        max_child_desc_chars=args.max_child_desc_chars,
-        max_path_chars=args.max_path_chars,
-    )
-    rng.shuffle(rows)
-    return rows[: args.max_examples_per_case]
-
-
-def build_traversal_rows(
-    dataset,
-    tree: dict,
-    all_tree_articles: set[str],
-    *,
-    max_cases: int,
-    max_rows: int,
-    seed: int,
-    args: argparse.Namespace,
-) -> tuple[list[dict], dict]:
-    rng = random.Random(seed)
-    indexes = list(range(len(dataset)))
-    rng.shuffle(indexes)
-
-    rows = []
-    cases_used = 0
-    skipped_cases = 0
-    for idx in indexes[:max_cases]:
-        case_rows = make_examples_for_case(dataset[idx], tree, all_tree_articles, args, rng)
-        if not case_rows:
-            skipped_cases += 1
-            continue
-        rows.extend(case_rows)
-        cases_used += 1
-        if len(rows) >= max_rows:
-            rows = rows[:max_rows]
-            break
-    return rows, {"cases_used": cases_used, "skipped_cases": skipped_cases, "rows": len(rows)}
 
 
 def tokenize_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, max_length: int, desc: str) -> Dataset:
@@ -680,7 +393,7 @@ def main() -> None:
             }
         )
 
-    tree = load_tree(tree_path)
+    tree = load_json_tree(tree_path)
     all_tree_articles = annotate_subtree_articles(tree)
     if is_main_process():
         print(f"Tree article IDs: {len(all_tree_articles)}")
@@ -708,7 +421,11 @@ def main() -> None:
         max_cases=args.max_train_cases,
         max_rows=args.max_train_examples,
         seed=args.seed,
-        args=args,
+        max_fact_chars=args.max_fact_chars,
+        include_single_child_nodes=args.include_single_child_nodes,
+        max_child_desc_chars=args.max_child_desc_chars,
+        max_path_chars=args.max_path_chars,
+        max_examples_per_case=args.max_examples_per_case,
     )
     eval_rows, eval_stats = (
         build_traversal_rows(
@@ -718,7 +435,11 @@ def main() -> None:
             max_cases=args.max_eval_cases,
             max_rows=args.max_eval_examples,
             seed=args.seed + 1,
-            args=args,
+            max_fact_chars=args.max_fact_chars,
+            include_single_child_nodes=args.include_single_child_nodes,
+            max_child_desc_chars=args.max_child_desc_chars,
+            max_path_chars=args.max_path_chars,
+            max_examples_per_case=args.max_examples_per_case,
         )
         if eval_cases is not None
         else ([], {})

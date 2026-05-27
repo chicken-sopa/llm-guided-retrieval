@@ -4,6 +4,9 @@ ECtHR Tree-Traversal LoRA/QLoRA Multi-GPU Training Script
 Script:
   src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py
 
+Shared ECtHR helpers:
+  src\llm_rl_playground\ecthr_training_utils.py
+
 What it trains:
   The script fine-tunes a small local model to make LATTICE-style tree traversal
   decisions for ECtHR alleged-violation prediction.
@@ -156,4 +159,3 @@ Notes
 
 5. Keep --ecthr-eval-use-llm-selector off if you want to measure the traversal
    adapter itself. Turning it on adds a final article-selection LLM step.
-
