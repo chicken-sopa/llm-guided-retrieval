@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset, load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -129,28 +130,42 @@ def tokenize_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, max_length:
             tokenize=False,
             add_generation_prompt=False,
         )
+        assistant_text = (
+            full_text[len(prompt_text) :]
+            if full_text.startswith(prompt_text)
+            else messages[-1]["content"] + (tokenizer.eos_token or "")
+        )
 
         prompt_tokens = tokenizer(
             prompt_text,
             add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
         )
-        full_tokens = tokenizer(
-            full_text,
+        assistant_tokens = tokenizer(
+            assistant_text,
             add_special_tokens=False,
-            truncation=True,
-            max_length=max_length,
         )
 
-        input_ids = full_tokens["input_ids"]
-        labels = input_ids.copy()
-        prompt_len = min(len(prompt_tokens["input_ids"]), len(labels))
-        labels[:prompt_len] = [-100] * prompt_len
+        prompt_ids = prompt_tokens["input_ids"]
+        answer_ids = assistant_tokens["input_ids"]
+        if not answer_ids:
+            answer_ids = tokenizer(
+                messages[-1]["content"] + (tokenizer.eos_token or ""),
+                add_special_tokens=False,
+            )["input_ids"]
+
+        if len(answer_ids) >= max_length:
+            prompt_ids = []
+            answer_ids = answer_ids[:max_length]
+        else:
+            max_prompt_len = max_length - len(answer_ids)
+            prompt_ids = prompt_ids[-max_prompt_len:]
+
+        input_ids = prompt_ids + answer_ids
+        labels = [-100] * len(prompt_ids) + answer_ids.copy()
 
         return {
             "input_ids": input_ids,
-            "attention_mask": full_tokens["attention_mask"],
+            "attention_mask": [1] * len(input_ids),
             "labels": labels,
         }
 
@@ -163,6 +178,27 @@ def tokenize_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, max_length:
         lambda example: any(label != -100 for label in example["labels"]),
         desc=f"{desc}: dropping fully masked examples",
     )
+
+
+class MemoryEfficientCausalLMTrainer(Trainer):
+    """Avoid the Qwen loss path that upcasts the full sequence logits to fp32."""
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+
+        shift_logits = logits[:, :-1, :]
+        shift_labels = labels[:, 1:].to(logits.device)
+        active_mask = shift_labels.ne(-100)
+        if not active_mask.any():
+            loss = logits.sum() * 0.0
+        else:
+            active_logits = shift_logits[active_mask]
+            active_labels = shift_labels[active_mask]
+            loss = F.cross_entropy(active_logits.float(), active_labels)
+
+        return (loss, outputs) if return_outputs else loss
 
 
 def resolve_compute_dtype() -> torch.dtype:
@@ -453,6 +489,13 @@ def main() -> None:
             print("First training answer:")
             print(train_rows[0]["messages"][2]["content"])
 
+    if not train_rows:
+        raise RuntimeError(
+            "No ECtHR traversal training rows were generated. Check that --max-train-cases and "
+            "--max-train-examples are > 0, and that the ECtHR labels overlap with articles found "
+            "in --tree-path."
+        )
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -474,6 +517,12 @@ def main() -> None:
         if eval_rows
         else None
     )
+    if len(train_dataset) == 0:
+        raise RuntimeError(
+            "The tokenized training dataset is empty after masking. This usually means the prompt "
+            "filled --max-length before the assistant JSON answer. The tokenizer now preserves the "
+            "answer side, so also check that --max-length is not extremely small."
+        )
 
     gc.collect()
     if torch.cuda.is_available():
@@ -509,7 +558,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    trainer = Trainer(
+    trainer = MemoryEfficientCausalLMTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
