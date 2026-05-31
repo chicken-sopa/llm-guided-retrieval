@@ -65,6 +65,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--use-4bit", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--resume-from-checkpoint", default=None)
+    parser.add_argument(
+        "--skip-training",
+        action="store_true",
+        help="Build the run context but do not train or save a new adapter. Useful with --run-ecthr-batched-eval.",
+    )
     parser.add_argument("--save-steps", type=int, default=0, help="If > 0, save every N steps; otherwise save per epoch.")
     parser.add_argument("--save-total-limit", type=int, default=2)
     parser.add_argument("--logging-steps", type=int, default=10)
@@ -329,8 +334,24 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
             torch.cuda.empty_cache()
         return summary
 
-    summaries = [run_one_eval("trained_tree_traversal_adapter", output_dir)]
-    if args.compare_base_model:
+    has_adapter = (output_dir / "adapter_config.json").exists() and (
+        (output_dir / "adapter_model.safetensors").exists() or (output_dir / "adapter_model.bin").exists()
+    )
+
+    summaries = []
+    if has_adapter:
+        label = "existing_tree_traversal_adapter" if args.skip_training else "trained_tree_traversal_adapter"
+        summaries.append(run_one_eval(label, output_dir))
+    elif args.skip_training:
+        print(f"No adapter found in {output_dir}; evaluating the base model only.")
+        summaries.append(run_one_eval("base_model_no_adapter", None))
+    else:
+        raise FileNotFoundError(
+            f"No saved adapter found in {output_dir}. Expected adapter_config.json and adapter_model.safetensors or adapter_model.bin."
+        )
+
+    already_ran_base = any(summary["run"].iloc[0] == "base_model_no_adapter" for summary in summaries)
+    if args.compare_base_model and not already_ran_base:
         summaries.append(run_one_eval("base_model_no_adapter", None))
 
     comparison_df = pd.concat(summaries, ignore_index=True)
@@ -467,12 +488,21 @@ def main() -> None:
             print("First training answer:")
             print(train_rows[0]["messages"][2]["content"])
 
-    if not train_rows:
+    if not train_rows and not args.skip_training:
         raise RuntimeError(
             "No ECtHR traversal training rows were generated. Check that --max-train-cases and "
             "--max-train-examples are > 0, and that the ECtHR labels overlap with articles found "
             "in --tree-path."
         )
+
+    if args.skip_training:
+        if is_main_process():
+            print("Skipping training because --skip-training was passed.")
+        if args.run_ecthr_batched_eval and is_main_process():
+            run_post_training_ecthr_batched_eval(args, output_dir, repo_root, tree_path)
+        elif is_main_process():
+            print("No training or ECtHR batched evaluation was run.")
+        return
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token is None:

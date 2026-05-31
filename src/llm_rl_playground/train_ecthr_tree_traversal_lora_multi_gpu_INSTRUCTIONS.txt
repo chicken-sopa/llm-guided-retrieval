@@ -60,6 +60,13 @@ Compare trained adapter against the base model:
 
   torchrun --nproc_per_node=2 src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --run-ecthr-batched-eval --compare-base-model
 
+Evaluate without training:
+
+  python src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --skip-training --run-ecthr-batched-eval --ecthr-eval-n-cases 2 --ecthr-eval-num-iters 3 --ecthr-eval-top-k-leaves 6
+
+If --output-dir contains a saved adapter, the script evaluates that adapter.
+Otherwise it evaluates the base model with no adapter.
+
 
 Important Flags
 ---------------
@@ -89,6 +96,7 @@ Training hyperparameters:
   --per-device-train-batch-size 1
   --gradient-accumulation-steps 8
   --max-length 2048
+  --skip-training
 
 LoRA:
   --lora-r 16
