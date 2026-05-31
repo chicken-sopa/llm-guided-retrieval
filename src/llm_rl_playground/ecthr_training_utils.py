@@ -270,6 +270,7 @@ def build_traversal_rows(
         rows.extend(case_rows)
         cases_used += 1
         if len(rows) >= max_rows:
+            print(f"no more cases added {cases_used + skipped_cases}")
             rows = rows[:max_rows]
             break
     return rows, {"cases_used": cases_used, "skipped_cases": skipped_cases, "rows": len(rows)}
