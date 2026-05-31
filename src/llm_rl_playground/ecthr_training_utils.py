@@ -252,6 +252,7 @@ def build_traversal_rows(
     cases_used = 0
     skipped_cases = 0
     for idx in indexes[:max_cases]:
+        print(f"current new Test case being created {idx}")
         case_rows = make_examples_for_case(
             dataset[idx],
             tree,

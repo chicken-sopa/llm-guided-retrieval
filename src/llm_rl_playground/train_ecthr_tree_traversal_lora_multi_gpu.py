@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 from datasets import Dataset, load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -178,27 +177,6 @@ def tokenize_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, max_length:
         lambda example: any(label != -100 for label in example["labels"]),
         desc=f"{desc}: dropping fully masked examples",
     )
-
-
-class MemoryEfficientCausalLMTrainer(Trainer):
-    """Avoid the Qwen loss path that upcasts the full sequence logits to fp32."""
-
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.logits
-
-        shift_logits = logits[:, :-1, :]
-        shift_labels = labels[:, 1:].to(logits.device)
-        active_mask = shift_labels.ne(-100)
-        if not active_mask.any():
-            loss = logits.sum() * 0.0
-        else:
-            active_logits = shift_logits[active_mask]
-            active_labels = shift_labels[active_mask]
-            loss = F.cross_entropy(active_logits.float(), active_labels)
-
-        return (loss, outputs) if return_outputs else loss
 
 
 def resolve_compute_dtype() -> torch.dtype:
@@ -558,7 +536,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    trainer = MemoryEfficientCausalLMTrainer(
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
