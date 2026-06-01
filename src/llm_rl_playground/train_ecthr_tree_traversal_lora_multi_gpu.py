@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ecthr-eval-n-cases", type=int, default=5)
     parser.add_argument("--ecthr-eval-start", type=int, default=0)
-    parser.add_argument("--ecthr-eval-num-iters", type=int, default=6)
+    parser.add_argument("--ecthr-eval-num-iters", type=int, default=10)
     parser.add_argument("--ecthr-eval-top-k-leaves", type=int, default=10)
     parser.add_argument("--ecthr-eval-prediction-min-score", type=float, default=0.4)
     parser.add_argument("--ecthr-eval-max-predicted-articles", type=int, default=None)
