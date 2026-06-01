@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import os
 import pickle
+import shutil
 import sys
+import time
 from pathlib import Path
 
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset, load_dataset, load_from_disk
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
@@ -74,6 +77,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-total-limit", type=int, default=2)
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--overwrite-dataset-cache",
+        action="store_true",
+        help="Rebuild the shared tokenized dataset cache before training.",
+    )
     parser.add_argument(
         "--run-ecthr-batched-eval",
         action="store_true",
@@ -182,6 +190,192 @@ def tokenize_dataset(raw_dataset: Dataset, tokenizer: AutoTokenizer, max_length:
         lambda example: any(label != -100 for label in example["labels"]),
         desc=f"{desc}: dropping fully masked examples",
     )
+
+
+def dataset_cache_key(args: argparse.Namespace, tree_path: Path) -> str:
+    tree_stat = tree_path.stat()
+    payload = {
+        "version": 2,
+        "model_id": args.model_id,
+        "ecthr_dataset": args.ecthr_dataset,
+        "ecthr_config": args.ecthr_config,
+        "train_split": args.train_split,
+        "eval_split": args.eval_split,
+        "tree_path": str(tree_path.resolve()),
+        "tree_mtime_ns": tree_stat.st_mtime_ns,
+        "tree_size": tree_stat.st_size,
+        "max_train_cases": args.max_train_cases,
+        "max_eval_cases": args.max_eval_cases,
+        "max_examples_per_case": args.max_examples_per_case,
+        "max_train_examples": args.max_train_examples,
+        "max_eval_examples": args.max_eval_examples,
+        "max_fact_chars": args.max_fact_chars,
+        "max_child_desc_chars": args.max_child_desc_chars,
+        "max_path_chars": args.max_path_chars,
+        "max_length": args.max_length,
+        "include_single_child_nodes": args.include_single_child_nodes,
+        "seed": args.seed,
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:16]
+
+
+def wait_for_dataset_cache(cache_dir: Path, timeout_s: int = 7200) -> None:
+    marker_path = cache_dir / "DONE"
+    start = time.monotonic()
+    while not marker_path.exists():
+        if time.monotonic() - start > timeout_s:
+            raise TimeoutError(f"Timed out waiting for rank 0 to create dataset cache: {cache_dir}")
+        time.sleep(2)
+
+
+def load_cached_tokenized_datasets(cache_dir: Path):
+    train_dataset = load_from_disk(str(cache_dir / "train"))
+    eval_dir = cache_dir / "eval"
+    eval_dataset = load_from_disk(str(eval_dir)) if eval_dir.exists() else None
+    stats_path = cache_dir / "stats.json"
+    stats = json.loads(stats_path.read_text(encoding="utf-8")) if stats_path.exists() else {}
+    return train_dataset, eval_dataset, stats
+
+
+def build_or_load_tokenized_datasets(
+    args: argparse.Namespace,
+    tree_path: Path,
+    output_dir: Path,
+    tokenizer: AutoTokenizer,
+):
+    cache_dir = output_dir / "dataset_cache" / dataset_cache_key(args, tree_path)
+    marker_path = cache_dir / "DONE"
+
+    if is_main_process():
+        print(f"Tokenized dataset cache: {cache_dir}")
+
+    if is_main_process() and (args.overwrite_dataset_cache or not marker_path.exists()):
+        if args.overwrite_dataset_cache and cache_dir.exists():
+            shutil.rmtree(cache_dir)
+
+        tmp_dir = cache_dir.with_name(f"{cache_dir.name}.tmp_rank0_{os.getpid()}")
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        tree = load_json_tree(tree_path)
+        all_tree_articles = annotate_subtree_articles(tree)
+        print(f"Tree article IDs: {len(all_tree_articles)}")
+
+        train_cases = load_dataset(
+            args.ecthr_dataset,
+            args.ecthr_config,
+            split=args.train_split,
+            trust_remote_code=True,
+        )
+        try:
+            eval_cases = load_dataset(
+                args.ecthr_dataset,
+                args.ecthr_config,
+                split=args.eval_split,
+                trust_remote_code=True,
+            )
+        except Exception:
+            eval_cases = None
+
+        train_rows, train_stats = build_traversal_rows(
+            train_cases,
+            tree,
+            all_tree_articles,
+            max_cases=args.max_train_cases,
+            max_rows=args.max_train_examples,
+            seed=args.seed,
+            max_fact_chars=args.max_fact_chars,
+            include_single_child_nodes=args.include_single_child_nodes,
+            max_child_desc_chars=args.max_child_desc_chars,
+            max_path_chars=args.max_path_chars,
+            max_examples_per_case=args.max_examples_per_case,
+        )
+        eval_rows, eval_stats = (
+            build_traversal_rows(
+                eval_cases,
+                tree,
+                all_tree_articles,
+                max_cases=args.max_eval_cases,
+                max_rows=args.max_eval_examples,
+                seed=args.seed + 1,
+                max_fact_chars=args.max_fact_chars,
+                include_single_child_nodes=args.include_single_child_nodes,
+                max_child_desc_chars=args.max_child_desc_chars,
+                max_path_chars=args.max_path_chars,
+                max_examples_per_case=args.max_examples_per_case,
+            )
+            if eval_cases is not None
+            else ([], {})
+        )
+
+        print({"train": train_stats, "eval": eval_stats})
+        if train_rows:
+            print("First training prompt preview:")
+            print(train_rows[0]["messages"][1]["content"][:1200])
+            print("First training answer:")
+            print(train_rows[0]["messages"][2]["content"])
+        else:
+            raise RuntimeError(
+                "No ECtHR traversal training rows were generated. Check that --max-train-cases and "
+                "--max-train-examples are > 0, and that the ECtHR labels overlap with articles found "
+                "in --tree-path."
+            )
+
+        train_dataset = tokenize_dataset(
+            Dataset.from_list(train_rows),
+            tokenizer,
+            args.max_length,
+            desc="Tokenizing traversal train examples",
+        )
+        eval_dataset = (
+            tokenize_dataset(
+                Dataset.from_list(eval_rows),
+                tokenizer,
+                args.max_length,
+                desc="Tokenizing traversal eval examples",
+            )
+            if eval_rows
+            else None
+        )
+        if len(train_dataset) == 0:
+            raise RuntimeError(
+                "The tokenized training dataset is empty after masking. This usually means the prompt "
+                "filled --max-length before the assistant JSON answer. The tokenizer now preserves the "
+                "answer side, so also check that --max-length is not extremely small."
+            )
+
+        train_dataset.save_to_disk(str(tmp_dir / "train"))
+        if eval_dataset is not None:
+            eval_dataset.save_to_disk(str(tmp_dir / "eval"))
+
+        stats = {
+            "train": train_stats,
+            "eval": eval_stats,
+            "train_dataset_rows": len(train_dataset),
+            "eval_dataset_rows": 0 if eval_dataset is None else len(eval_dataset),
+        }
+        (tmp_dir / "stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+        (tmp_dir / "DONE").write_text("ok\n", encoding="utf-8")
+
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+        tmp_dir.rename(cache_dir)
+    elif not is_main_process():
+        wait_for_dataset_cache(cache_dir)
+
+    train_dataset, eval_dataset, stats = load_cached_tokenized_datasets(cache_dir)
+    if is_main_process():
+        print(
+            {
+                "train_dataset_rows": len(train_dataset),
+                "eval_dataset_rows": 0 if eval_dataset is None else len(eval_dataset),
+                "cache": str(cache_dir),
+                "stats": stats,
+            }
+        )
+    return train_dataset, eval_dataset
 
 
 def resolve_compute_dtype() -> torch.dtype:
@@ -428,73 +622,6 @@ def main() -> None:
             }
         )
 
-    tree = load_json_tree(tree_path)
-    all_tree_articles = annotate_subtree_articles(tree)
-    if is_main_process():
-        print(f"Tree article IDs: {len(all_tree_articles)}")
-
-    train_cases = load_dataset(
-        args.ecthr_dataset,
-        args.ecthr_config,
-        split=args.train_split,
-        trust_remote_code=True,
-    )
-    try:
-        eval_cases = load_dataset(
-            args.ecthr_dataset,
-            args.ecthr_config,
-            split=args.eval_split,
-            trust_remote_code=True,
-        )
-    except Exception:
-        eval_cases = None
-
-    train_rows, train_stats = build_traversal_rows(
-        train_cases,
-        tree,
-        all_tree_articles,
-        max_cases=args.max_train_cases,
-        max_rows=args.max_train_examples,
-        seed=args.seed,
-        max_fact_chars=args.max_fact_chars,
-        include_single_child_nodes=args.include_single_child_nodes,
-        max_child_desc_chars=args.max_child_desc_chars,
-        max_path_chars=args.max_path_chars,
-        max_examples_per_case=args.max_examples_per_case,
-    )
-    eval_rows, eval_stats = (
-        build_traversal_rows(
-            eval_cases,
-            tree,
-            all_tree_articles,
-            max_cases=args.max_eval_cases,
-            max_rows=args.max_eval_examples,
-            seed=args.seed + 1,
-            max_fact_chars=args.max_fact_chars,
-            include_single_child_nodes=args.include_single_child_nodes,
-            max_child_desc_chars=args.max_child_desc_chars,
-            max_path_chars=args.max_path_chars,
-            max_examples_per_case=args.max_examples_per_case,
-        )
-        if eval_cases is not None
-        else ([], {})
-    )
-
-    if is_main_process():
-        print({"train": train_stats, "eval": eval_stats})
-        if train_rows:
-            print("First training prompt preview:")
-            print(train_rows[0]["messages"][1]["content"][:1200])
-            print("First training answer:")
-            print(train_rows[0]["messages"][2]["content"])
-
-    if not train_rows and not args.skip_training:
-        raise RuntimeError(
-            "No ECtHR traversal training rows were generated. Check that --max-train-cases and "
-            "--max-train-examples are > 0, and that the ECtHR labels overlap with articles found "
-            "in --tree-path."
-        )
-
     if args.skip_training:
         if is_main_process():
             print("Skipping training because --skip-training was passed.")
@@ -509,28 +636,7 @@ def main() -> None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    train_dataset = tokenize_dataset(
-        Dataset.from_list(train_rows),
-        tokenizer,
-        args.max_length,
-        desc="Tokenizing traversal train examples",
-    )
-    eval_dataset = (
-        tokenize_dataset(
-            Dataset.from_list(eval_rows),
-            tokenizer,
-            args.max_length,
-            desc="Tokenizing traversal eval examples",
-        )
-        if eval_rows
-        else None
-    )
-    if len(train_dataset) == 0:
-        raise RuntimeError(
-            "The tokenized training dataset is empty after masking. This usually means the prompt "
-            "filled --max-length before the assistant JSON answer. The tokenizer now preserves the "
-            "answer side, so also check that --max-length is not extremely small."
-        )
+    train_dataset, eval_dataset = build_or_load_tokenized_datasets(args, tree_path, output_dir, tokenizer)
 
     gc.collect()
     if torch.cuda.is_available():

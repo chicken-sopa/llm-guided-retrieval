@@ -97,6 +97,7 @@ Training hyperparameters:
   --gradient-accumulation-steps 8
   --max-length 2048
   --skip-training
+  --overwrite-dataset-cache
 
 LoRA:
   --lora-r 16
@@ -162,8 +163,12 @@ Notes
 
 3. Start with the tiny smoke test before running a full training job.
 
-4. Keep --run-ecthr-batched-eval off during long training if you only want the
+4. With torchrun, rank 0 builds and tokenizes the ECtHR training dataset once
+   under output_dir/dataset_cache. Other ranks wait for that cache and load it.
+   Use --overwrite-dataset-cache when you want to force rebuilding it.
+
+5. Keep --run-ecthr-batched-eval off during long training if you only want the
    adapter. Turn it on when you want immediate retrieval-quality feedback.
 
-5. Keep --ecthr-eval-use-llm-selector off if you want to measure the traversal
+6. Keep --ecthr-eval-use-llm-selector off if you want to measure the traversal
    adapter itself. Turning it on adds a final article-selection LLM step.
