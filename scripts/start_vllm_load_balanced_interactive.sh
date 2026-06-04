@@ -122,7 +122,6 @@ for ((i = 0; i < num_gpus; i++)); do
         --dtype "$dtype"
         --gpu-memory-utilization "$gpu_mem_util"
         --max-model-len "$max_model_len"
-        --disable-log-requests
     )
 
     if [[ -n "$adapter_path" ]]; then
