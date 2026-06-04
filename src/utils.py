@@ -279,17 +279,13 @@ def post_process(output, return_json=False, extract_key=None):
       except json.JSONDecodeError:
         pass
 
-    if isinstance(output_text, str) and '```json' in output_text:
-      fenced_matches = re.findall(r"(?:```json\s*)(.+?)(?:```)", output_text, re.DOTALL)
-      if fenced_matches:
-        output_text = fenced_matches[-1]
-      else:
-        output_text = output_text.split('```json', 1)[-1].strip()
+    if '```json' in output_text:
+      output_text = re.findall(r"(?:```json\s*)(.+)(?:```)", output_text, re.DOTALL)[-1]
     output_json = repair_json(output_text, return_objects=True)
     if return_json: return output_json
     output_text = recursive_key_search(output, extract_key)
     return output_text
-  except (KeyError, IndexError, TypeError, ValueError) as k:
+  except KeyError as k:
     print(f'Encountered error {k} in post processing: {output}')
     return None
 

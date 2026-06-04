@@ -477,6 +477,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
     }
     if eval_hp.LLM_API_BACKEND == "vllm":
         eval_llm_api_kwargs.pop("response_mime_type", None)
+        eval_llm_api_kwargs.pop("response_schema", None)
         eval_llm_api_kwargs["max_tokens"] = 384
     elif eval_hp.LLM_API_BACKEND == "openai":
         eval_llm_api_kwargs.pop("response_mime_type", None)

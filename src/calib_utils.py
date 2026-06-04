@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
 
 def get_bimodal_gmm_intrsxn(theta, plot=False):
-    if len(theta) < 2:
-        return float(theta[0]) if len(theta) else 0.0
     gmm = GaussianMixture(n_components=2)
     theta_reshaped = theta.reshape(-1, 1)
     gmm.fit(theta_reshaped)
