@@ -113,6 +113,11 @@ QLoRA:
 Evaluation:
   --run-ecthr-batched-eval
   --compare-base-model
+  --ecthr-eval-llm-api-backend localModel
+  --ecthr-eval-model-id Qwen/Qwen2.5-1.5B-Instruct
+  --ecthr-eval-base-model-id Qwen/Qwen2.5-1.5B-Instruct
+  --ecthr-eval-vllm-base-url http://localhost:8000/v1
+  --ecthr-eval-max-concurrent-calls 8
   --ecthr-eval-n-cases 5
   --ecthr-eval-start 0
   --ecthr-eval-num-iters 6
@@ -151,6 +156,24 @@ If ECtHR batched evaluation is enabled, it also saves:
 If --compare-base-model is enabled, it also saves:
   base_model_no_adapter_ecthr_eval_rows.json
   base_model_no_adapter_ecthr_eval_results.json
+
+
+ECtHR Evaluation Backends
+-------------------------
+
+The post-training ECtHR LATTICE comparison defaults to localModel, which loads
+the adapter from --output-dir. You can switch it to the same API backends used
+by LATTICE:
+
+  --ecthr-eval-llm-api-backend localModel
+  --ecthr-eval-llm-api-backend vllm
+  --ecthr-eval-llm-api-backend openai
+  --ecthr-eval-llm-api-backend genai
+
+For vLLM with a served LoRA adapter, pass the adapter's served model name as
+--ecthr-eval-model-id and the base model name as --ecthr-eval-base-model-id:
+
+  python src\llm_rl_playground\train_ecthr_tree_traversal_lora_multi_gpu.py --skip-training --run-ecthr-batched-eval --compare-base-model --ecthr-eval-llm-api-backend vllm --ecthr-eval-vllm-base-url http://localhost:8000/v1,http://localhost:8001/v1 --ecthr-eval-model-id ecthr_adapter --ecthr-eval-base-model-id Qwen/Qwen2.5-1.5B-Instruct
 
 
 Notes

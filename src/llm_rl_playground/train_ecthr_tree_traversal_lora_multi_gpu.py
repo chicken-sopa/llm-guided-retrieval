@@ -97,6 +97,28 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Tree path for LATTICE evaluation. Defaults to the repo .pkl EU tree, falling back to --tree-path.",
     )
+    parser.add_argument(
+        "--ecthr-eval-llm-api-backend",
+        default="localModel",
+        choices=["localModel", "local", "vllm", "openai", "genai"],
+        help="LLM backend used by the ECtHR LATTICE comparison.",
+    )
+    parser.add_argument(
+        "--ecthr-eval-model-id",
+        default=None,
+        help="Model name for the adapter/trained run during ECtHR LATTICE comparison. Defaults to --model-id.",
+    )
+    parser.add_argument(
+        "--ecthr-eval-base-model-id",
+        default=None,
+        help="Model name for the base comparison run. Defaults to --model-id.",
+    )
+    parser.add_argument(
+        "--ecthr-eval-vllm-base-url",
+        default=None,
+        help="vLLM OpenAI-compatible base URL(s), comma separated. Defaults to VLLM_BASE_URL or http://localhost:8000/v1.",
+    )
+    parser.add_argument("--ecthr-eval-max-concurrent-calls", type=int, default=None)
     parser.add_argument("--ecthr-eval-n-cases", type=int, default=5)
     parser.add_argument("--ecthr-eval-start", type=int, default=0)
     parser.add_argument("--ecthr-eval-num-iters", type=int, default=10)
@@ -405,7 +427,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
     import pandas as pd
 
     from hyperparams import HyperParams
-    from llm_apis import LocalModelAPI
+    from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
     from llm_rl_playground.ecthr_evaluation import (
         EcthrTraversalEvaluator,
         get_label_names,
@@ -426,11 +448,12 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
     eval_hp = HyperParams.from_args("--subset fiqa --tree_version eu_conventions_notebook")
     eval_hp.TREE_PATH = str(eval_tree_path)
     eval_hp.DATASET = "EU"
-    eval_hp.LLM_API_BACKEND = "localModel"
-    eval_hp.LLM = args.model_id
+    eval_hp.LLM_API_BACKEND = args.ecthr_eval_llm_api_backend
+    eval_hp.LLM = args.ecthr_eval_model_id or args.model_id
     eval_hp.LLM_API_TIMEOUT = 120
     eval_hp.LLM_API_MAX_RETRIES = 4
-    eval_hp.LLM_MAX_CONCURRENT_CALLS = 1
+    default_concurrency = 1 if eval_hp.LLM_API_BACKEND in {"local", "localModel"} else 8
+    eval_hp.LLM_MAX_CONCURRENT_CALLS = args.ecthr_eval_max_concurrent_calls or default_concurrency
     eval_hp.LLM_API_STAGGERING_DELAY = 0.05
     eval_hp.REASONING_IN_TRAVERSAL_PROMPT = -1
     eval_hp.SUBSET = "fiqa"
@@ -451,8 +474,19 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
         "response_schema": get_traversal_prompt_response_constraint(bool(eval_hp.REASONING_IN_TRAVERSAL_PROMPT)),
         "staggering_delay": eval_hp.LLM_API_STAGGERING_DELAY,
         "print_summary_report": False,
-        "max_new_tokens": 384,
     }
+    if eval_hp.LLM_API_BACKEND == "vllm":
+        eval_llm_api_kwargs.pop("response_mime_type", None)
+        eval_llm_api_kwargs.pop("response_schema", None)
+        eval_llm_api_kwargs["max_tokens"] = 384
+    elif eval_hp.LLM_API_BACKEND == "openai":
+        eval_llm_api_kwargs.pop("response_mime_type", None)
+        eval_llm_api_kwargs["max_output_tokens"] = 384
+    elif eval_hp.LLM_API_BACKEND == "genai":
+        eval_llm_api_kwargs["max_output_tokens"] = 384
+    elif eval_hp.LLM_API_BACKEND in {"local", "localModel"}:
+        eval_llm_api_kwargs.pop("response_mime_type", None)
+        eval_llm_api_kwargs["max_new_tokens"] = 384
 
     eval_dataset = load_ecthr_dataset(split=args.eval_split, config=args.ecthr_config)
     label_names = get_label_names(eval_dataset)
@@ -471,20 +505,58 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
             "eval_num_iters": args.ecthr_eval_num_iters,
             "eval_top_k_leaves": args.ecthr_eval_top_k_leaves,
             "compare_base_model": args.compare_base_model,
+            "llm_api_backend": eval_hp.LLM_API_BACKEND,
+            "eval_model_id": args.ecthr_eval_model_id or args.model_id,
+            "eval_base_model_id": args.ecthr_eval_base_model_id or args.model_id,
+            "eval_max_concurrent_calls": eval_hp.LLM_MAX_CONCURRENT_CALLS,
         }
     )
 
-    def make_local_ecthr_evaluator(adapter_path: Path | None) -> EcthrTraversalEvaluator:
-        api = LocalModelAPI(
-            args.model_id,
-            logger=eval_logger,
-            timeout=eval_hp.LLM_API_TIMEOUT,
-            max_retries=eval_hp.LLM_API_MAX_RETRIES,
-            adapter_path=None if adapter_path is None else str(adapter_path),
-            use_4bit=args.use_4bit,
-            serialize_requests=True,
-            log_api_calls=False,
-        )
+    def make_eval_api(model_id: str, adapter_path: Path | None = None):
+        backend = eval_hp.LLM_API_BACKEND
+        if backend == "genai":
+            return GenAIAPI(
+                model_id,
+                logger=eval_logger,
+                timeout=eval_hp.LLM_API_TIMEOUT,
+                max_retries=eval_hp.LLM_API_MAX_RETRIES,
+            )
+        if backend == "openai":
+            return OpenAIResponsesAPI(
+                model_id,
+                logger=eval_logger,
+                timeout=eval_hp.LLM_API_TIMEOUT,
+                max_retries=eval_hp.LLM_API_MAX_RETRIES,
+            )
+        if backend == "vllm":
+            return VllmAPI(
+                model_id,
+                logger=eval_logger,
+                timeout=eval_hp.LLM_API_TIMEOUT,
+                max_retries=eval_hp.LLM_API_MAX_RETRIES,
+                base_url=args.ecthr_eval_vllm_base_url or os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
+                load_balance=True,
+            )
+        if backend in {"local", "localModel"}:
+            return LocalModelAPI(
+                model_id,
+                logger=eval_logger,
+                timeout=eval_hp.LLM_API_TIMEOUT,
+                max_retries=eval_hp.LLM_API_MAX_RETRIES,
+                adapter_path=None if adapter_path is None else str(adapter_path),
+                use_4bit=args.use_4bit,
+                serialize_requests=True,
+                log_api_calls=False,
+            )
+        raise ValueError(f"Unknown ECtHR eval backend: {backend}")
+
+    def unload_eval_api(api) -> None:
+        runtime = getattr(api, "runtime", None)
+        if runtime is not None:
+            runtime.unload()
+
+    def make_ecthr_evaluator(model_id: str, adapter_path: Path | None = None) -> EcthrTraversalEvaluator:
+        api = make_eval_api(model_id, adapter_path=adapter_path)
         return EcthrTraversalEvaluator(
             semantic_root_node=semantic_root_node,
             node_registry=node_registry,
@@ -494,9 +566,10 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
             llm_api_kwargs=eval_llm_api_kwargs,
         )
 
-    def run_one_eval(label: str, adapter_path: Path | None):
+    def run_one_eval(label: str, model_id: str, adapter_path: Path | None = None):
         print(f"\n================ Running {label} ================")
-        evaluator = make_local_ecthr_evaluator(adapter_path)
+        print({"model_id": model_id, "adapter_path": None if adapter_path is None else str(adapter_path)})
+        evaluator = make_ecthr_evaluator(model_id, adapter_path)
         df, results = evaluator.evaluate_ecthr_cases_batched(
             eval_dataset,
             label_names,
@@ -521,24 +594,27 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
                 ensure_ascii=False,
                 indent=2,
             )
-        evaluator.llm_api.runtime.unload()
+        unload_eval_api(evaluator.llm_api)
         del evaluator
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         return summary
 
-    has_adapter = (output_dir / "adapter_config.json").exists() and (
+    has_local_adapter = (output_dir / "adapter_config.json").exists() and (
         (output_dir / "adapter_model.safetensors").exists() or (output_dir / "adapter_model.bin").exists()
     )
+    backend_uses_local_adapter = eval_hp.LLM_API_BACKEND in {"local", "localModel"}
 
     summaries = []
-    if has_adapter:
+    if has_local_adapter or not backend_uses_local_adapter:
         label = "existing_tree_traversal_adapter" if args.skip_training else "trained_tree_traversal_adapter"
-        summaries.append(run_one_eval(label, output_dir))
+        adapter_model_id = args.ecthr_eval_model_id or args.model_id
+        adapter_path = output_dir if backend_uses_local_adapter else None
+        summaries.append(run_one_eval(label, adapter_model_id, adapter_path))
     elif args.skip_training:
         print(f"No adapter found in {output_dir}; evaluating the base model only.")
-        summaries.append(run_one_eval("base_model_no_adapter", None))
+        summaries.append(run_one_eval("base_model_no_adapter", args.ecthr_eval_base_model_id or args.model_id, None))
     else:
         raise FileNotFoundError(
             f"No saved adapter found in {output_dir}. Expected adapter_config.json and adapter_model.safetensors or adapter_model.bin."
@@ -546,7 +622,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
 
     already_ran_base = any(summary["run"].iloc[0] == "base_model_no_adapter" for summary in summaries)
     if args.compare_base_model and not already_ran_base:
-        summaries.append(run_one_eval("base_model_no_adapter", None))
+        summaries.append(run_one_eval("base_model_no_adapter", args.ecthr_eval_base_model_id or args.model_id, None))
 
     comparison_df = pd.concat(summaries, ignore_index=True)
     comparison_path = output_dir / "ecthr_batched_eval_comparison.csv"
