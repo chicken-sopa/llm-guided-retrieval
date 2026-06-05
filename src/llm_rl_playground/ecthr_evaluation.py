@@ -367,6 +367,35 @@ class EcthrTraversalEvaluator:
             excluded_ids_set=set(),
         )
 
+    def parse_traversal_response_or_none(
+        self,
+        output: Any,
+        *,
+        step: int | None = None,
+        prompt_index: int | None = None,
+    ) -> dict | None:
+        """Repair a traversal response if possible; return None if it is still unusable."""
+        from utils import post_process
+
+        parsed = post_process(output, return_json=True)
+        if isinstance(parsed, dict):
+            return parsed
+
+        location = []
+        if step is not None:
+            location.append(f"iteration {step + 1}")
+        if prompt_index is not None:
+            location.append(f"prompt {prompt_index}")
+        location_text = f" ({', '.join(location)})" if location else ""
+        preview = str(output).replace("\n", " ")[:500]
+        self.logger.warning(
+            "Traversal response is badly formatted after attempted repair%s; "
+            "removing it from this traversal update. Raw preview: %s",
+            location_text,
+            preview,
+        )
+        return None
+
     async def run_lattice_iterations_for_samples_async(
         self,
         samples: list[InferSample],
@@ -387,9 +416,17 @@ class EcthrTraversalEvaluator:
             flat_prompts = [prompt for prompt, _ in flat_inputs]
             flat_slates = [slate for _, slate in flat_inputs]
             raw_responses = await self.llm_api.run_batch(flat_prompts, **self.llm_api_kwargs)
-            from utils import post_process
-
-            flat_response_jsons = [post_process(output, return_json=True) for output in raw_responses]
+            flat_response_jsons = [
+                self.parse_traversal_response_or_none(output, step=step, prompt_index=idx)
+                for idx, output in enumerate(raw_responses)
+            ]
+            skipped_count = sum(response_json is None for response_json in flat_response_jsons)
+            if skipped_count:
+                self.logger.warning(
+                    "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
+                    skipped_count,
+                    len(flat_response_jsons),
+                )
 
             offset = 0
             for sample, count in zip(samples, counts):
@@ -623,15 +660,26 @@ class EcthrTraversalEvaluator:
             prompts = [prompt for prompt, _ in inputs]
             slates = [slate for _, slate in inputs]
             raw_responses = await self.llm_api.run_batch(prompts, **self.llm_api_kwargs)
-            from utils import post_process
 
-            response_jsons = [post_process(output, return_json=True) for output in raw_responses]
+            response_jsons = [
+                self.parse_traversal_response_or_none(output, step=step, prompt_index=idx)
+                for idx, output in enumerate(raw_responses)
+            ]
+            skipped_count = sum(response_json is None for response_json in response_jsons)
+            if skipped_count:
+                self.logger.warning(
+                    "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
+                    skipped_count,
+                    len(response_jsons),
+                )
             sample.update(slates, response_jsons)
             if detailed_logs:
                 self.print_frontier(sample)
                 if response_jsons:
-                    print("\nReasoning preview:")
-                    print(str(response_jsons[0].get("reasoning", ""))[:800])
+                    first_valid_response = next((item for item in response_jsons if isinstance(item, dict)), None)
+                    if first_valid_response:
+                        print("\nReasoning preview:")
+                        print(str(first_valid_response.get("reasoning", ""))[:800])
         return sample
 
     def run_query(self, query: str, num_iters: int = 4, detailed_logs: bool = False) -> InferSample:

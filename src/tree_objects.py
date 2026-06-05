@@ -349,7 +349,7 @@ class InferSample(object):
     inputs = []
     top_preds = self.get_top_predictions(k=None, rel_fn=self.get_rel_fn(return_calibrated_rel=True))
     assert all([s <= 1.0001 for _, s in top_preds]), f'Top predictions not normalized: {top_preds}'
-    if len(top_preds) > self.num_leaf_calib:
+    if self.num_leaf_calib and len(top_preds) > self.num_leaf_calib:
       theta = np.array([max(s, -1) for _, s in top_preds])
       th = get_bimodal_gmm_intrsxn(theta)
       p = [((4**(2*s)) if s > th else 1e-4) for _, s in top_preds]
@@ -384,6 +384,20 @@ class InferSample(object):
       cur_state = state_path[-1]
       cur_semantic_node = cur_state.semantic_node
 
+      def remove_bad_response_from_search(reason):
+        self.logger.warning(reason)
+        cur_state.instantiate_children(
+            [0.0 for _ in cur_semantic_node.child],
+            reason,
+            creation_step=len(self.beam_state_paths_history)+1,
+        )
+
+      if response_json is None:
+        remove_bad_response_from_search(
+            'Traversal response is badly formatted after attempted repair; removing this beam from the search.'
+        )
+        continue
+
       reasoning = recursive_key_search(response_json, 'reasoning')
       relevance_scores = recursive_key_search(response_json, 'relevance_scores')
       ranking = recursive_key_search(response_json, 'ranking')
@@ -392,6 +406,11 @@ class InferSample(object):
       if relevance_scores is None and len(slate) == 1:
         self.logger.warning(f'Missing relevance_scores for single-candidate slate; defaulting to candidate 0. Response: {response_json}')
         relevance_scores = [[0, 50]]
+      if relevance_scores is None:
+        remove_bad_response_from_search(
+            f'Traversal response has no ranking or relevance_scores after repair; removing this beam from the search. Response: {response_json}'
+        )
+        continue
       parsed_relevance_scores = {}
       try:
         for item in relevance_scores or []:
@@ -417,6 +436,12 @@ class InferSample(object):
       except Exception as e:
         self.logger.error(f'Error parsing relevance scores: {relevance_scores}, slate: {slate} with error {e}')
         relevance_scores = None
+
+      if not relevance_scores:
+        remove_bad_response_from_search(
+            f'Traversal response has no usable relevance scores after parsing; removing this beam from the search. Response: {response_json}'
+        )
+        continue
 
       if relevance_scores:
         self.calib_model.add(relevance_scores)
