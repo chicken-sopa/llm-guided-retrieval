@@ -241,6 +241,7 @@ class InferSample(object):
     self.search_with_path_relevance = hp.SEARCH_WITH_PATH_RELEVANCE
     self.num_leaf_calib = hp.NUM_LEAF_CALIB
     self.logger = logger
+    self.show_error_logs = bool(getattr(hp, 'SHOW_ERROR_LOGS', True))
 
     self.get_traversal_prompt = partial(get_traversal_prompt, hp=hp, logger=logger, return_constraint=False)
     self.get_reranking_prompt = partial(get_reranking_prompt, hp=hp, logger=logger)
@@ -384,8 +385,12 @@ class InferSample(object):
       cur_state = state_path[-1]
       cur_semantic_node = cur_state.semantic_node
 
+      def log_error_detail(reason, level='warning'):
+        if self.show_error_logs:
+          getattr(self.logger, level)(reason)
+
       def remove_bad_response_from_search(reason):
-        self.logger.warning(reason)
+        log_error_detail(reason)
         cur_state.instantiate_children(
             [0.0 for _ in cur_semantic_node.child],
             reason,
@@ -404,7 +409,7 @@ class InferSample(object):
       if relevance_scores is None and ranking is not None:
         relevance_scores = [[idx, 100 / np.log2(rank + 2)] for rank, idx in enumerate(ranking)]
       if relevance_scores is None and len(slate) == 1:
-        self.logger.warning(f'Missing relevance_scores for single-candidate slate; defaulting to candidate 0. Response: {response_json}')
+        log_error_detail(f'Missing relevance_scores for single-candidate slate; defaulting to candidate 0. Response: {response_json}')
         relevance_scores = [[0, 50]]
       if relevance_scores is None:
         remove_bad_response_from_search(
@@ -415,7 +420,7 @@ class InferSample(object):
       try:
         for item in relevance_scores or []:
           if not isinstance(item, (list, tuple)) or len(item) != 2:
-            self.logger.warning(f'Ignoring malformed relevance score item: {item}')
+            log_error_detail(f'Ignoring malformed relevance score item: {item}')
             continue
 
           k, v = item
@@ -423,18 +428,18 @@ class InferSample(object):
             candidate_idx = int(k)
             score = float(v) / 100
           except (TypeError, ValueError) as e:
-            self.logger.warning(f'Ignoring unparsable relevance score item: {item} with error {e}')
+            log_error_detail(f'Ignoring unparsable relevance score item: {item} with error {e}')
             continue
 
           if candidate_idx < 0 or candidate_idx >= len(slate):
-            self.logger.warning(f'Ignoring out-of-range relevance score id {candidate_idx}; slate length is {len(slate)}, slate: {slate}')
+            log_error_detail(f'Ignoring out-of-range relevance score id {candidate_idx}; slate length is {len(slate)}, slate: {slate}')
             continue
 
           parsed_relevance_scores[slate[candidate_idx]] = min(max(score, 0.0), 1.0)
 
         relevance_scores = parsed_relevance_scores
       except Exception as e:
-        self.logger.error(f'Error parsing relevance scores: {relevance_scores}, slate: {slate} with error {e}')
+        log_error_detail(f'Error parsing relevance scores: {relevance_scores}, slate: {slate} with error {e}', level='error')
         relevance_scores = None
 
       if not relevance_scores:

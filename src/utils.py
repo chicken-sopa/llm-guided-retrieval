@@ -264,7 +264,7 @@ def recursive_key_search(obj, key):
   return None
 
 import re
-def post_process(output, return_json=False, extract_key=None):
+def post_process(output, return_json=False, extract_key=None, show_error_logs=True):
   try:
     if output is None:
       return None
@@ -290,7 +290,8 @@ def post_process(output, return_json=False, extract_key=None):
     output_text = recursive_key_search(output, extract_key)
     return output_text
   except (KeyError, IndexError, TypeError, ValueError) as k:
-    print(f'Encountered error {k} in post processing: {output}')
+    if show_error_logs:
+      print(f'Encountered error {k} in post processing: {output}')
     return None
 
 def validate_genai_response_constraint(response_text, constraint):

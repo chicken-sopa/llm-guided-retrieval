@@ -353,6 +353,7 @@ class EcthrTraversalEvaluator:
     logger: Any
     llm_api: Any
     llm_api_kwargs: dict[str, Any]
+    show_error_logs: bool = False
 
     def make_sample(self, query: str) -> InferSample:
         from tree_objects import InferSample
@@ -377,7 +378,7 @@ class EcthrTraversalEvaluator:
         """Repair a traversal response if possible; return None if it is still unusable."""
         from utils import post_process
 
-        parsed = post_process(output, return_json=True)
+        parsed = post_process(output, return_json=True, show_error_logs=self.show_error_logs)
         if isinstance(parsed, dict):
             return parsed
 
@@ -388,12 +389,13 @@ class EcthrTraversalEvaluator:
             location.append(f"prompt {prompt_index}")
         location_text = f" ({', '.join(location)})" if location else ""
         preview = str(output).replace("\n", " ")[:500]
-        self.logger.warning(
-            "Traversal response is badly formatted after attempted repair%s; "
-            "removing it from this traversal update. Raw preview: %s",
-            location_text,
-            preview,
-        )
+        if self.show_error_logs:
+            self.logger.warning(
+                "Traversal response is badly formatted after attempted repair%s; "
+                "removing it from this traversal update. Raw preview: %s",
+                location_text,
+                preview,
+            )
         return None
 
     async def run_lattice_iterations_for_samples_async(
@@ -421,7 +423,7 @@ class EcthrTraversalEvaluator:
                 for idx, output in enumerate(raw_responses)
             ]
             skipped_count = sum(response_json is None for response_json in flat_response_jsons)
-            if skipped_count:
+            if skipped_count and self.show_error_logs:
                 self.logger.warning(
                     "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
                     skipped_count,
@@ -666,7 +668,7 @@ class EcthrTraversalEvaluator:
                 for idx, output in enumerate(raw_responses)
             ]
             skipped_count = sum(response_json is None for response_json in response_jsons)
-            if skipped_count:
+            if skipped_count and self.show_error_logs:
                 self.logger.warning(
                     "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
                     skipped_count,

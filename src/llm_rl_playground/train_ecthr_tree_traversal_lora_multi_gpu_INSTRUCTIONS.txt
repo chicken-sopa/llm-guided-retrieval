@@ -195,3 +195,33 @@ Notes
 
 6. Keep --ecthr-eval-use-llm-selector off if you want to measure the traversal
    adapter itself. Turning it on adds a final article-selection LLM step.
+
+
+
+
+
+
+
+
+-------------------------------------------- Test comparision -------------------------------------------------------------------------- 
+source logs/vllm_load_balanced_env.sh
+
+PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
+  --skip-training \
+  --run-ecthr-batched-eval \
+  --compare-base-model \
+  --ecthr-eval-llm-api-backend vllm \
+  --ecthr-eval-vllm-base-url "$VLLM_BASE_URL" \
+  --model-id Qwen/Qwen2.5-1.5B-Instruct \
+  --ecthr-eval-model-id "$LATTICE_VLLM_MODEL" \
+  --ecthr-eval-base-model-id Qwen/Qwen2.5-1.5B-Instruct \
+  --output-dir src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora \
+  --ecthr-config alleged-violation-prediction \
+  --eval-split validation \
+  --ecthr-eval-start 0 \
+  --ecthr-eval-n-cases 1000 \
+  --ecthr-eval-num-iters 10 \
+  --ecthr-eval-top-k-leaves 10 \
+  --ecthr-eval-prediction-min-score 0.4 \
+  --ecthr-eval-use-llm-selector \
+  --ecthr-eval-max-concurrent-calls 12

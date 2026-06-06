@@ -457,6 +457,7 @@ class LanguageModelAPI(ABC):
         retries = kwargs.pop("max_retries", self.max_retries)
         timeout = kwargs.pop("timeout", self.timeout)
         prompt_index = kwargs.pop("prompt_index", -1)
+        show_error_logs = kwargs.pop("show_error_logs", True)
 
         if batch_metrics:
             batch_metrics.increment_active()
@@ -500,9 +501,11 @@ class LanguageModelAPI(ABC):
                     if batch_metrics:
                         batch_metrics.add_error(error_type, error_msg, prompt_index, attempt + 1)
                     
-                    self.logger.warning(f"{error_msg} on attempt {attempt + 1}.")
+                    if show_error_logs:
+                        self.logger.warning(f"{error_msg} on attempt {attempt + 1}.")
                     if attempt + 1 >= retries:
-                        self.logger.critical("Max retries reached after timeout. Raising final exception.")
+                        if show_error_logs:
+                            self.logger.critical("Max retries reached after timeout. Raising final exception.")
                         raise
 
                 except Exception as e:
@@ -534,7 +537,8 @@ class LanguageModelAPI(ABC):
                     self.logger.debug(f"API call failed on attempt {attempt + 1} - {error_type}: {str(e)}")
                     
                     if attempt + 1 >= retries:
-                        self.logger.critical(f"Max retries reached. Final error type: {error_type}")
+                        if show_error_logs:
+                            self.logger.critical(f"Max retries reached. Final error type: {error_type}")
                         raise
 
                     # Wait before retrying with categorized backoff
@@ -612,7 +616,8 @@ class LanguageModelAPI(ABC):
         final_results = []
         for i, res in enumerate(results):
             if isinstance(res, Exception):
-                self.logger.warning(f"Prompt {i+1} in batch failed: {str(res)}")
+                if kwargs.get("show_error_logs", True):
+                    self.logger.warning(f"Prompt {i+1} in batch failed: {str(res)}")
                 final_results.append(f"Error: {res}")
             else:
                 final_results.append(res)

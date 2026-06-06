@@ -130,6 +130,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use the final LLM article selector during post-training ECtHR evaluation.",
     )
+    parser.add_argument(
+        "--show-error-logs",
+        action="store_true",
+        help="Print detailed per-prompt API/traversal error logs during ECtHR comparison.",
+    )
     return parser.parse_args()
 
 
@@ -463,6 +468,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
     eval_hp.RELEVANCE_CHAIN_FACTOR = 0.5
     eval_hp.MAX_PROMPT_PROTO_SIZE = None
     eval_hp.MAX_DOC_DESC_CHAR_LEN = None
+    eval_hp.SHOW_ERROR_LOGS = args.show_error_logs
 
     eval_logger = setup_logger(
         "train_ecthr_tree_traversal_lora_multi_gpu_eval",
@@ -474,6 +480,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
         "response_schema": get_traversal_prompt_response_constraint(bool(eval_hp.REASONING_IN_TRAVERSAL_PROMPT)),
         "staggering_delay": eval_hp.LLM_API_STAGGERING_DELAY,
         "print_summary_report": False,
+        "show_error_logs": args.show_error_logs,
     }
     if eval_hp.LLM_API_BACKEND == "vllm":
         eval_llm_api_kwargs.pop("response_mime_type", None)
@@ -564,6 +571,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
             logger=eval_logger,
             llm_api=api,
             llm_api_kwargs=eval_llm_api_kwargs,
+            show_error_logs=args.show_error_logs,
         )
 
     def run_one_eval(label: str, model_id: str, adapter_path: Path | None = None):
