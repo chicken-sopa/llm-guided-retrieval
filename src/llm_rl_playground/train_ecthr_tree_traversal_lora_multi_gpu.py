@@ -690,9 +690,9 @@ def main() -> None:
     tree_path = Path(args.tree_path) if args.tree_path else (
         repo_root / "trees" / "EU" / "eu_conventions_notebook" / "eu_conventions_tree-bottom-up-llm.json"
     )
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir).expanduser()
     if not output_dir.is_absolute():
-        output_dir = Path(__file__).resolve().parent / output_dir
+        output_dir = (Path.cwd() / output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if is_main_process():
