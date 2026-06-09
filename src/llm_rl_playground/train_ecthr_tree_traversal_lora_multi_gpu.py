@@ -119,6 +119,12 @@ def parse_args() -> argparse.Namespace:
         help="vLLM OpenAI-compatible base URL(s), comma separated. Defaults to VLLM_BASE_URL or http://localhost:8000/v1.",
     )
     parser.add_argument("--ecthr-eval-max-concurrent-calls", type=int, default=None)
+    parser.add_argument(
+        "--ecthr-eval-parse-max-concurrent-calls",
+        type=int,
+        default=None,
+        help="Max worker-thread concurrency for local traversal response repair/parsing. Defaults to ECtHR eval call concurrency.",
+    )
     parser.add_argument("--ecthr-eval-n-cases", type=int, default=5)
     parser.add_argument("--ecthr-eval-start", type=int, default=0)
     parser.add_argument("--ecthr-eval-num-iters", type=int, default=10)
@@ -481,6 +487,7 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
         "staggering_delay": eval_hp.LLM_API_STAGGERING_DELAY,
         "print_summary_report": False,
         "show_error_logs": args.show_error_logs,
+        "parse_max_concurrent_calls": args.ecthr_eval_parse_max_concurrent_calls or eval_hp.LLM_MAX_CONCURRENT_CALLS,
     }
     if eval_hp.LLM_API_BACKEND == "vllm":
         eval_llm_api_kwargs.pop("response_mime_type", None)

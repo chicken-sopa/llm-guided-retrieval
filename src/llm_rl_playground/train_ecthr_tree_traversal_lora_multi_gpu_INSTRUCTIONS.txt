@@ -242,6 +242,9 @@ torchrun --standalone --nproc_per_node=4 \
 -------------------------------------------- Test comparision -------------------------------------------------------------------------- 
 source logs/vllm_load_balanced_env.sh
 
+OMP_NUM_THREADS=12 \
+MKL_NUM_THREADS=12 \
+TOKENIZERS_PARALLELISM=true \
 PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
   --skip-training \
   --run-ecthr-batched-eval \

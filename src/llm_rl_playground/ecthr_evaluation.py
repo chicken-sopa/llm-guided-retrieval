@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -398,6 +399,47 @@ class EcthrTraversalEvaluator:
             )
         return None
 
+    async def parse_traversal_response_or_none_async(
+        self,
+        output: Any,
+        *,
+        step: int | None = None,
+        prompt_index: int | None = None,
+    ) -> dict | None:
+        """Run traversal response repair/parsing in a worker thread."""
+        return await asyncio.to_thread(
+            self.parse_traversal_response_or_none,
+            output,
+            step=step,
+            prompt_index=prompt_index,
+        )
+
+    async def parse_traversal_responses_async(
+        self,
+        raw_responses: list[Any],
+        *,
+        step: int | None = None,
+    ) -> list[dict | None]:
+        parse_concurrency = (
+            self.llm_api_kwargs.get("parse_max_concurrent_calls")
+            or self.llm_api_kwargs.get("max_concurrent_calls")
+            or 16
+        )
+        semaphore = asyncio.Semaphore(int(parse_concurrency))
+
+        async def parse_one(idx: int, output: Any) -> dict | None:
+            async with semaphore:
+                return await self.parse_traversal_response_or_none_async(
+                    output,
+                    step=step,
+                    prompt_index=idx,
+                )
+
+        tasks = []
+        for idx, output in enumerate(raw_responses):
+            tasks.append(parse_one(idx, output))
+        return list(await asyncio.gather(*tasks))
+
     async def run_lattice_iterations_for_samples_async(
         self,
         samples: list[InferSample],
@@ -418,10 +460,7 @@ class EcthrTraversalEvaluator:
             flat_prompts = [prompt for prompt, _ in flat_inputs]
             flat_slates = [slate for _, slate in flat_inputs]
             raw_responses = await self.llm_api.run_batch(flat_prompts, **self.llm_api_kwargs)
-            flat_response_jsons = [
-                self.parse_traversal_response_or_none(output, step=step, prompt_index=idx)
-                for idx, output in enumerate(raw_responses)
-            ]
+            flat_response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
             skipped_count = sum(response_json is None for response_json in flat_response_jsons)
             if skipped_count and self.show_error_logs:
                 self.logger.warning(
@@ -663,10 +702,7 @@ class EcthrTraversalEvaluator:
             slates = [slate for _, slate in inputs]
             raw_responses = await self.llm_api.run_batch(prompts, **self.llm_api_kwargs)
 
-            response_jsons = [
-                self.parse_traversal_response_or_none(output, step=step, prompt_index=idx)
-                for idx, output in enumerate(raw_responses)
-            ]
+            response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
             skipped_count = sum(response_json is None for response_json in response_jsons)
             if skipped_count and self.show_error_logs:
                 self.logger.warning(
