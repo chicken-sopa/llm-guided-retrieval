@@ -864,6 +864,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         config_params.pop('max_retries', None)
         config_params.pop('timeout', None)
         config_params.pop('prompt_index', None)
+        config_params.pop('parse_max_concurrent_calls', None)
         config_params.pop('response_mime_type', None)
         config_params.pop('thinking_config', None)
 

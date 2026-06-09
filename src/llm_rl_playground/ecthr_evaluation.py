@@ -369,6 +369,14 @@ class EcthrTraversalEvaluator:
             excluded_ids_set=set(),
         )
 
+    def get_llm_run_kwargs(self) -> dict[str, Any]:
+        """Return kwargs meant for the LLM API, excluding local evaluator-only options."""
+        return {
+            key: value
+            for key, value in self.llm_api_kwargs.items()
+            if key not in {"parse_max_concurrent_calls"}
+        }
+
     def parse_traversal_response_or_none(
         self,
         output: Any,
@@ -459,7 +467,7 @@ class EcthrTraversalEvaluator:
 
             flat_prompts = [prompt for prompt, _ in flat_inputs]
             flat_slates = [slate for _, slate in flat_inputs]
-            raw_responses = await self.llm_api.run_batch(flat_prompts, **self.llm_api_kwargs)
+            raw_responses = await self.llm_api.run_batch(flat_prompts, **self.get_llm_run_kwargs())
             flat_response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
             skipped_count = sum(response_json is None for response_json in flat_response_jsons)
             if skipped_count and self.show_error_logs:
@@ -507,7 +515,7 @@ class EcthrTraversalEvaluator:
             return results
 
         selector_kwargs = {
-            **self.llm_api_kwargs,
+            **self.get_llm_run_kwargs(),
             "response_schema": ARTICLE_SELECTOR_RESPONSE_SCHEMA,
             "print_summary_report": False,
         }
@@ -700,7 +708,7 @@ class EcthrTraversalEvaluator:
             inputs = sample.get_step_prompts()
             prompts = [prompt for prompt, _ in inputs]
             slates = [slate for _, slate in inputs]
-            raw_responses = await self.llm_api.run_batch(prompts, **self.llm_api_kwargs)
+            raw_responses = await self.llm_api.run_batch(prompts, **self.get_llm_run_kwargs())
 
             response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
             skipped_count = sum(response_json is None for response_json in response_jsons)
