@@ -39,10 +39,10 @@ Your entire response must start with `{{` and end with `}}`. Do not write analys
 
 * `reasoning`: This must be a **string**.
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
-* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 85]].
+* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 0]] for an irrelevant candidate or [[0, 85]] for a relevant candidate.
 
 Required JSON shape:
-{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 85]]}}
+{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 0]]}}
 
 ---
 
@@ -89,10 +89,10 @@ Your entire response must start with `{{` and end with `}}`. Do not write analys
 
 * `reasoning`: This must be a **string**.
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
-* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 85]].
+* `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 0]] for an irrelevant candidate or [[0, 85]] for a relevant candidate.
 
 Required JSON shape:
-{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 85]]}}
+{{"reasoning": "...", "ranking": [0], "relevance_scores": [[0, 0]]}}
 
 ---
 

@@ -407,10 +407,14 @@ class InferSample(object):
       relevance_scores = recursive_key_search(response_json, 'relevance_scores')
       ranking = recursive_key_search(response_json, 'ranking')
       if relevance_scores is None and ranking is not None:
-        relevance_scores = [[idx, 100 / np.log2(rank + 2)] for rank, idx in enumerate(ranking)]
+        if len(slate) == 1:
+          log_error_detail(f'Missing relevance_scores for ranking-only single-candidate slate; using non-promoting score 0. Response: {response_json}')
+          relevance_scores = [[0, 0]]
+        else:
+          relevance_scores = [[idx, 100 / np.log2(rank + 2)] for rank, idx in enumerate(ranking)]
       if relevance_scores is None and len(slate) == 1:
-        log_error_detail(f'Missing relevance_scores for single-candidate slate; defaulting to candidate 0. Response: {response_json}')
-        relevance_scores = [[0, 50]]
+        log_error_detail(f'Missing relevance_scores for single-candidate slate; using non-promoting score 0. Response: {response_json}')
+        relevance_scores = [[0, 0]]
       if relevance_scores is None:
         remove_bad_response_from_search(
             f'Traversal response has no ranking or relevance_scores after repair; removing this beam from the search. Response: {response_json}'

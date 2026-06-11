@@ -437,11 +437,11 @@ class EcthrTraversalEvaluator:
         return {
             "reasoning": (
                 "Local model did not return the required traversal JSON. "
-                f"Using the only valid candidate ID {candidate_id} as a fallback. "
+                f"Using the only valid candidate ID {candidate_id} as a non-promoting fallback. "
                 f"Raw response preview: {preview}"
             ),
             "ranking": [candidate_id],
-            "relevance_scores": [[candidate_id, 50]],
+            "relevance_scores": [[candidate_id, 0]],
         }
 
     async def parse_traversal_response_or_none_async(

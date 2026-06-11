@@ -209,7 +209,7 @@ def _fallback_traversal_json(response_text: str, valid_candidate_ids: List[int])
         return None
 
     candidate_id = valid_candidate_ids[0]
-    score = 50
+    score = 0
     try:
         repaired_object = repair_json(response_text, return_objects=True)
         for value in repaired_object.values() if isinstance(repaired_object, dict) else []:
@@ -225,7 +225,7 @@ def _fallback_traversal_json(response_text: str, valid_candidate_ids: List[int])
     fallback = {
         "reasoning": (
             "Local model did not return the required traversal JSON. "
-            f"Using the only valid candidate ID {candidate_id} as a fallback. "
+            f"Using the only valid candidate ID {candidate_id} as a non-promoting fallback. "
             f"Raw response: {str(repaired_object)[:500]}"
         ),
         "ranking": [candidate_id],
