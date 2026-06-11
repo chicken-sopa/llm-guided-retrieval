@@ -381,6 +381,7 @@ class EcthrTraversalEvaluator:
         self,
         output: Any,
         *,
+        prompt: Any = None,
         step: int | None = None,
         prompt_index: int | None = None,
     ) -> dict | None:
@@ -390,6 +391,10 @@ class EcthrTraversalEvaluator:
         parsed = post_process(output, return_json=True, show_error_logs=self.show_error_logs)
         if isinstance(parsed, dict):
             return parsed
+
+        fallback = self.single_candidate_fallback_response(prompt, output)
+        if fallback is not None:
+            return fallback
 
         location = []
         if step is not None:
@@ -407,10 +412,43 @@ class EcthrTraversalEvaluator:
             )
         return None
 
+    @staticmethod
+    def valid_candidate_ids_from_prompt(prompt: Any) -> list[int]:
+        if prompt is None:
+            return []
+        if isinstance(prompt, list):
+            prompt_text = "\n".join(str(message.get("content", message)) for message in prompt)
+        else:
+            prompt_text = str(prompt)
+
+        match = re.search(r"Valid candidate IDs for this request:\s*([^\n.]+)", prompt_text)
+        if not match:
+            return []
+        return [int(candidate_id) for candidate_id in re.findall(r"\d+", match.group(1))]
+
+    @staticmethod
+    def single_candidate_fallback_response(prompt: Any, output: Any) -> dict | None:
+        valid_candidate_ids = EcthrTraversalEvaluator.valid_candidate_ids_from_prompt(prompt)
+        if len(valid_candidate_ids) != 1:
+            return None
+
+        candidate_id = valid_candidate_ids[0]
+        preview = str(output).replace("\n", " ")[:500]
+        return {
+            "reasoning": (
+                "Local model did not return the required traversal JSON. "
+                f"Using the only valid candidate ID {candidate_id} as a fallback. "
+                f"Raw response preview: {preview}"
+            ),
+            "ranking": [candidate_id],
+            "relevance_scores": [[candidate_id, 50]],
+        }
+
     async def parse_traversal_response_or_none_async(
         self,
         output: Any,
         *,
+        prompt: Any = None,
         step: int | None = None,
         prompt_index: int | None = None,
     ) -> dict | None:
@@ -418,6 +456,7 @@ class EcthrTraversalEvaluator:
         return await asyncio.to_thread(
             self.parse_traversal_response_or_none,
             output,
+            prompt=prompt,
             step=step,
             prompt_index=prompt_index,
         )
@@ -426,6 +465,7 @@ class EcthrTraversalEvaluator:
         self,
         raw_responses: list[Any],
         *,
+        prompts: list[Any] | None = None,
         step: int | None = None,
     ) -> list[dict | None]:
         parse_concurrency = (
@@ -437,8 +477,10 @@ class EcthrTraversalEvaluator:
 
         async def parse_one(idx: int, output: Any) -> dict | None:
             async with semaphore:
+                prompt = prompts[idx] if prompts is not None and idx < len(prompts) else None
                 return await self.parse_traversal_response_or_none_async(
                     output,
+                    prompt=prompt,
                     step=step,
                     prompt_index=idx,
                 )
@@ -468,7 +510,11 @@ class EcthrTraversalEvaluator:
             flat_prompts = [prompt for prompt, _ in flat_inputs]
             flat_slates = [slate for _, slate in flat_inputs]
             raw_responses = await self.llm_api.run_batch(flat_prompts, **self.get_llm_run_kwargs())
-            flat_response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
+            flat_response_jsons = await self.parse_traversal_responses_async(
+                raw_responses,
+                prompts=flat_prompts,
+                step=step,
+            )
             skipped_count = sum(response_json is None for response_json in flat_response_jsons)
             if skipped_count and self.show_error_logs:
                 self.logger.warning(
@@ -710,7 +756,11 @@ class EcthrTraversalEvaluator:
             slates = [slate for _, slate in inputs]
             raw_responses = await self.llm_api.run_batch(prompts, **self.get_llm_run_kwargs())
 
-            response_jsons = await self.parse_traversal_responses_async(raw_responses, step=step)
+            response_jsons = await self.parse_traversal_responses_async(
+                raw_responses,
+                prompts=prompts,
+                step=step,
+            )
             skipped_count = sum(response_json is None for response_json in response_jsons)
             if skipped_count and self.show_error_logs:
                 self.logger.warning(

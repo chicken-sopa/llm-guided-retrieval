@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pickle
+import re
 import shutil
 import sys
 import time
@@ -43,7 +44,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to EU semantic tree JSON. Defaults to repo trees/EU/eu_conventions_notebook/eu_conventions_tree-bottom-up-llm.json.",
     )
-    parser.add_argument("--output-dir", default="outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory for checkpoints, adapter, cache, and eval files. Defaults to src/llm_rl_playground/outputs/<model-name>.",
+    )
     parser.add_argument("--ecthr-dataset", default="AUEB-NLP/ecthr_cases")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
     parser.add_argument("--train-split", default="train")
@@ -146,6 +151,14 @@ def parse_args() -> argparse.Namespace:
 
 def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def default_output_dir_for_model(repo_root: Path, model_id: str) -> Path:
+    model_name = Path(model_id.rstrip("/")).name or model_id
+    safe_model_name = re.sub(r"[^A-Za-z0-9._-]+", "-", model_name).strip("-")
+    if not safe_model_name:
+        safe_model_name = "model"
+    return repo_root / "src" / "llm_rl_playground" / "outputs" / safe_model_name
 
 
 def is_main_process() -> bool:
@@ -697,9 +710,12 @@ def main() -> None:
     tree_path = Path(args.tree_path) if args.tree_path else (
         repo_root / "trees" / "EU" / "eu_conventions_notebook" / "eu_conventions_tree-bottom-up-llm.json"
     )
-    output_dir = Path(args.output_dir).expanduser()
-    if not output_dir.is_absolute():
-        output_dir = (Path.cwd() / output_dir).resolve()
+    if args.output_dir:
+        output_dir = Path(args.output_dir).expanduser()
+        if not output_dir.is_absolute():
+            output_dir = (Path.cwd() / output_dir).resolve()
+    else:
+        output_dir = default_output_dir_for_model(repo_root, args.model_id)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if is_main_process():

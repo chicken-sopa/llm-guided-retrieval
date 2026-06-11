@@ -74,8 +74,17 @@ Important Flags
 Model:
   --model-id Qwen/Qwen2.5-1.5B-Instruct
 
+Tree:
+  --tree-path trees/EU/eu_conventions_notebook/eu_conventions_tree-bottom-up-llm.json
+
 Output adapter directory:
-  --output-dir outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora
+  --output-dir src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora
+
+  If --output-dir is omitted, the script saves to:
+    src/llm_rl_playground/outputs/<model-name>
+
+  For --model-id Qwen/Qwen2.5-1.5B-Instruct, the default is:
+    src/llm_rl_playground/outputs/Qwen2.5-1.5B-Instruct
 
 Dataset:
   --ecthr-dataset AUEB-NLP/ecthr_cases
@@ -89,15 +98,23 @@ Training size:
   --max-eval-cases 200
   --max-eval-examples 1000
   --max-examples-per-case 8
+  --max-fact-chars 9000
+  --max-child-desc-chars 1100
+  --max-path-chars 1800
+  --include-single-child-nodes
 
 Training hyperparameters:
   --num-train-epochs 1.0
   --learning-rate 2e-4
   --per-device-train-batch-size 1
+  --per-device-eval-batch-size 1
   --gradient-accumulation-steps 8
   --max-length 2048
-  --skip-training
-  --overwrite-dataset-cache
+  --resume-from-checkpoint path/to/checkpoint-XXX
+  --save-steps 0
+  --save-total-limit 2
+  --logging-steps 10
+  --seed 42
 
 LoRA:
   --lora-r 16
@@ -110,9 +127,14 @@ QLoRA:
   Disable 4-bit and use regular LoRA:
     --no-use-4bit
 
+Run control:
+  --skip-training
+  --overwrite-dataset-cache
+
 Evaluation:
   --run-ecthr-batched-eval
   --compare-base-model
+  --ecthr-eval-tree-path trees/EU/eu_conventions_notebook/eu_conventions_tree-bottom-up-llm.pkl
   --ecthr-eval-llm-api-backend localModel
   --ecthr-eval-model-id Qwen/Qwen2.5-1.5B-Instruct
   --ecthr-eval-base-model-id Qwen/Qwen2.5-1.5B-Instruct
@@ -124,7 +146,66 @@ Evaluation:
   --ecthr-eval-num-iters 6
   --ecthr-eval-top-k-leaves 10
   --ecthr-eval-prediction-min-score 0.4
+  --ecthr-eval-max-predicted-articles 10
   --ecthr-eval-use-llm-selector
+  --show-error-logs
+
+
+Complete CLI Flag Checklist
+---------------------------
+
+The script currently defines these flags:
+
+  --model-id
+  --tree-path
+  --output-dir
+  --ecthr-dataset
+  --ecthr-config
+  --train-split
+  --eval-split
+  --max-train-cases
+  --max-eval-cases
+  --max-examples-per-case
+  --max-train-examples
+  --max-eval-examples
+  --max-fact-chars
+  --max-child-desc-chars
+  --max-path-chars
+  --max-length
+  --include-single-child-nodes
+  --num-train-epochs
+  --learning-rate
+  --per-device-train-batch-size
+  --per-device-eval-batch-size
+  --gradient-accumulation-steps
+  --lora-r
+  --lora-alpha
+  --lora-dropout
+  --use-4bit / --no-use-4bit
+  --resume-from-checkpoint
+  --skip-training
+  --save-steps
+  --save-total-limit
+  --logging-steps
+  --seed
+  --overwrite-dataset-cache
+  --run-ecthr-batched-eval
+  --compare-base-model
+  --ecthr-eval-tree-path
+  --ecthr-eval-llm-api-backend
+  --ecthr-eval-model-id
+  --ecthr-eval-base-model-id
+  --ecthr-eval-vllm-base-url
+  --ecthr-eval-max-concurrent-calls
+  --ecthr-eval-parse-max-concurrent-calls
+  --ecthr-eval-n-cases
+  --ecthr-eval-start
+  --ecthr-eval-num-iters
+  --ecthr-eval-top-k-leaves
+  --ecthr-eval-prediction-min-score
+  --ecthr-eval-max-predicted-articles
+  --ecthr-eval-use-llm-selector
+  --show-error-logs
 
 
 Resume Training
@@ -141,7 +222,10 @@ Outputs
 The script saves a PEFT LoRA adapter, not a full merged model.
 
 Default output:
-  src\llm_rl_playground\outputs\qwen2.5-1.5b-ecthr-tree-traversal-lora
+  src\llm_rl_playground\outputs\<model-name>
+
+For --model-id Qwen/Qwen2.5-1.5B-Instruct:
+  src\llm_rl_playground\outputs\Qwen2.5-1.5B-Instruct
 
 Typical adapter files:
   adapter_config.json
@@ -235,8 +319,8 @@ torchrun --standalone --nproc_per_node=4 \
   --logging-steps 5 \
   --save-steps 250 \
   --save-total-limit 3 \
-  --use-4bit
-
+  --use-4bit \
+  --overwrite-dataset-cache
 
 
 
@@ -266,4 +350,3 @@ PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_mult
   --ecthr-eval-max-concurrent-calls 24 \
   --ecthr-eval-parse-max-concurrent-calls 32 \
   --ecthr-eval-use-llm-selector
-

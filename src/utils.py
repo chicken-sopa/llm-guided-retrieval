@@ -264,6 +264,40 @@ def recursive_key_search(obj, key):
   return None
 
 import re
+
+def extract_balanced_json_fragment(text):
+  if not isinstance(text, str):
+    return None
+
+  for opener, closer in (('{', '}'), ('[', ']')):
+    start = text.find(opener)
+    if start == -1:
+      continue
+
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+      char = text[index]
+      if escape:
+        escape = False
+        continue
+      if char == '\\':
+        escape = True
+        continue
+      if char == '"':
+        in_string = not in_string
+        continue
+      if in_string:
+        continue
+      if char == opener:
+        depth += 1
+      elif char == closer:
+        depth -= 1
+        if depth == 0:
+          return text[start:index + 1].strip()
+  return None
+
 def post_process(output, return_json=False, extract_key=None, show_error_logs=True):
   try:
     if output is None:
@@ -285,6 +319,27 @@ def post_process(output, return_json=False, extract_key=None, show_error_logs=Tr
         output_text = fenced_matches[-1]
       else:
         output_text = output_text.split('```json', 1)[-1].strip()
+
+    candidates = []
+    balanced_fragment = extract_balanced_json_fragment(output_text)
+    if balanced_fragment:
+      candidates.append(balanced_fragment)
+    if output_text not in candidates:
+      candidates.append(output_text)
+
+    last_error = None
+    for candidate in candidates:
+      try:
+        output_json = repair_json(candidate, return_objects=True)
+        if return_json: return output_json
+        output_text = recursive_key_search(output, extract_key)
+        return output_text
+      except (KeyError, IndexError, TypeError, ValueError) as k:
+        last_error = k
+        continue
+
+    if last_error:
+      raise last_error
     output_json = repair_json(output_text, return_objects=True)
     if return_json: return output_json
     output_text = recursive_key_search(output, extract_key)

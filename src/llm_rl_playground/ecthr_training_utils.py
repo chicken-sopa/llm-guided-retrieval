@@ -119,6 +119,7 @@ Valid candidate IDs for this request: {valid_ids}.
 {format_child_options(children, max_child_desc_chars)}
 
 Return one clean JSON object with exactly these keys: reasoning, ranking, relevance_scores.
+Your entire response must start with {{ and end with }}. Do not write analysis before or after the JSON.
 The ranking must include only valid candidate IDs, ordered from most to least relevant.
 The relevance_scores field must be an array of [candidate_id, score] pairs with scores from 0 to 100."""
 
