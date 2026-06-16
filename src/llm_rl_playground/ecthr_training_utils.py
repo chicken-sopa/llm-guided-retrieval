@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import random
 from pathlib import Path
@@ -19,6 +20,114 @@ except ModuleNotFoundError:
         extract_articles_from_tree_text,
         normalize_article_label,
     )
+
+
+@dataclass(slots=True)
+class ChatMessage:
+    role: str
+    content: str
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ChatMessage":
+        return cls(role=str(payload["role"]), content=str(payload["content"]))
+
+    def to_dict(self) -> dict[str, str]:
+        return {"role": self.role, "content": self.content}
+
+
+@dataclass(slots=True)
+class TraversalTrainingRow:
+    messages: list[ChatMessage]
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "TraversalTrainingRow":
+        return cls(messages=[ChatMessage.from_dict(message) for message in payload["messages"]])
+
+    @property
+    def prompt(self) -> str:
+        return self.messages[1].content
+
+    @property
+    def answer(self) -> str:
+        return self.messages[2].content
+
+    def to_dict(self) -> dict[str, list[dict[str, str]]]:
+        return {"messages": [message.to_dict() for message in self.messages]}
+
+
+@dataclass(slots=True)
+class TraversalDatasetStats:
+    cases_used: int
+    skipped_cases: int
+    rows: int
+
+    @classmethod
+    def empty(cls) -> "TraversalDatasetStats":
+        return cls(cases_used=0, skipped_cases=0, rows=0)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "TraversalDatasetStats":
+        return cls(
+            cases_used=int(payload.get("cases_used", 0)),
+            skipped_cases=int(payload.get("skipped_cases", 0)),
+            rows=int(payload.get("rows", 0)),
+        )
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "cases_used": self.cases_used,
+            "skipped_cases": self.skipped_cases,
+            "rows": self.rows,
+        }
+
+
+@dataclass(slots=True)
+class TraversalDataset:
+    rows: list[TraversalTrainingRow]
+    stats: TraversalDatasetStats
+
+    @classmethod
+    def empty(cls) -> "TraversalDataset":
+        return cls(rows=[], stats=TraversalDatasetStats.empty())
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "TraversalDataset":
+        return cls(
+            rows=[TraversalTrainingRow.from_dict(row) for row in payload.get("rows", [])],
+            stats=TraversalDatasetStats.from_dict(payload.get("stats", {})),
+        )
+
+    @classmethod
+    def from_json_path(cls, path: str | Path) -> "TraversalDataset":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    @classmethod
+    def from_records(
+        cls,
+        rows: list[dict[str, Any]],
+        stats: dict[str, Any] | TraversalDatasetStats | None = None,
+    ) -> "TraversalDataset":
+        typed_stats = (
+            stats
+            if isinstance(stats, TraversalDatasetStats)
+            else TraversalDatasetStats.from_dict(stats or {"rows": len(rows)})
+        )
+        return cls(rows=[TraversalTrainingRow.from_dict(row) for row in rows], stats=typed_stats)
+
+    def __bool__(self) -> bool:
+        return bool(self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"rows": self.to_records(), "stats": self.stats.to_dict()}
+
+    def to_json_path(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def to_records(self) -> list[dict[str, list[dict[str, str]]]]:
+        return [row.to_dict() for row in self.rows]
 
 
 def clean_space(value: Any) -> str:
@@ -146,7 +255,7 @@ def collect_case_traversal_examples(
     facts: str,
     gold_articles: set[str],
     path_labels: list[str],
-    rows: list[dict],
+    rows: list[TraversalTrainingRow],
     include_single_child_nodes: bool = False,
     max_child_desc_chars: int = 1100,
     max_path_chars: int = 1800,
@@ -173,16 +282,16 @@ def collect_case_traversal_examples(
         )
         answer = make_traversal_answer(positive_ids, children, gold_articles)
         rows.append(
-            {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are an ECtHR semantic-tree traversal model. Return only valid JSON.",
-                    },
-                    {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)},
+            TraversalTrainingRow(
+                messages=[
+                    ChatMessage(
+                        role="system",
+                        content="You are an ECtHR semantic-tree traversal model. Return only valid JSON.",
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                    ChatMessage(role="assistant", content=json.dumps(answer, ensure_ascii=False)),
                 ]
-            }
+            )
         )
 
     next_path = path_labels + [node_label(node)]
@@ -210,7 +319,7 @@ def make_examples_for_case(
     max_child_desc_chars: int = 1100,
     max_path_chars: int = 1800,
     max_examples_per_case: int = 8,
-) -> list[dict]:
+) -> list[TraversalTrainingRow]:
     gold_articles = set(example_gold_articles(example))
     gold_articles &= set(all_tree_articles)
     if not gold_articles:
@@ -244,12 +353,12 @@ def build_traversal_rows(
     max_child_desc_chars: int = 1100,
     max_path_chars: int = 1800,
     max_examples_per_case: int = 8,
-) -> tuple[list[dict], dict]:
+) -> TraversalDataset:
     rng = random.Random(seed)
     indexes = list(range(len(dataset)))
     rng.shuffle(indexes)
 
-    rows = []
+    rows: list[TraversalTrainingRow] = []
     cases_used = 0
     skipped_cases = 0
     for idx in indexes[:max_cases]:
@@ -274,7 +383,10 @@ def build_traversal_rows(
             print(f"no more cases added {cases_used + skipped_cases}")
             rows = rows[:max_rows]
             break
-    return rows, {"cases_used": cases_used, "skipped_cases": skipped_cases, "rows": len(rows)}
+    return TraversalDataset(
+        rows=rows,
+        stats=TraversalDatasetStats(cases_used=cases_used, skipped_cases=skipped_cases, rows=len(rows)),
+    )
 
 
 def article_id_from_chunk(chunk: dict) -> str | None:

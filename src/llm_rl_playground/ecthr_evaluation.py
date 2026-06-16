@@ -189,7 +189,10 @@ def predicted_articles_from_sample(
     predicted = set()
     rows = []
 
-    for rank, (node, score) in enumerate(sample.get_top_predictions(k=k), start=1):
+    def leaf_local_score(node: Any) -> float:
+        return float(getattr(node, "local_relevance", 0.0))
+
+    for rank, (node, score) in enumerate(sample.get_top_predictions(k=k, rel_fn=leaf_local_score), start=1):
         article_ids = extract_articles_from_tree_text(node.desc)
         passes_filters = bool(article_ids) and (min_score is None or float(score) >= min_score)
         included = False
@@ -205,6 +208,8 @@ def predicted_articles_from_sample(
             {
                 "rank": rank,
                 "score": float(score),
+                "path_score": float(getattr(node, "path_relevance", 0.0)),
+                "parent_score": float(getattr(node.parent, "path_relevance", 0.0)) if getattr(node, "parent", None) else 0.0,
                 "node_id": node.id,
                 "included": included,
                 "articles": sorted(article_ids),

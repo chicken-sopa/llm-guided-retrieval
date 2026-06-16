@@ -28,10 +28,11 @@ try:
     from llm_rl_playground.ecthr_training_utils import (
         annotate_subtree_articles,
         build_traversal_rows,
+        TraversalDataset,
         load_json_tree,
     )
 except ModuleNotFoundError:
-    from ecthr_training_utils import annotate_subtree_articles, build_traversal_rows, load_json_tree
+    from ecthr_training_utils import annotate_subtree_articles, build_traversal_rows, TraversalDataset, load_json_tree
 
 
 def parse_args() -> argparse.Namespace:
@@ -325,7 +326,7 @@ def build_or_load_tokenized_datasets(
         except Exception:
             eval_cases = None
 
-        train_rows, train_stats = build_traversal_rows(
+        train_traversal_dataset = build_traversal_rows(
             train_cases,
             tree,
             all_tree_articles,
@@ -338,7 +339,7 @@ def build_or_load_tokenized_datasets(
             max_path_chars=args.max_path_chars,
             max_examples_per_case=args.max_examples_per_case,
         )
-        eval_rows, eval_stats = (
+        eval_traversal_dataset = (
             build_traversal_rows(
                 eval_cases,
                 tree,
@@ -353,15 +354,15 @@ def build_or_load_tokenized_datasets(
                 max_examples_per_case=args.max_examples_per_case,
             )
             if eval_cases is not None
-            else ([], {})
+            else TraversalDataset.empty()
         )
 
-        print({"train": train_stats, "eval": eval_stats})
-        if train_rows:
+        print({"train": train_traversal_dataset.stats.to_dict(), "eval": eval_traversal_dataset.stats.to_dict()})
+        if train_traversal_dataset:
             print("First training prompt preview:")
-            print(train_rows[0]["messages"][1]["content"][:1200])
+            print(train_traversal_dataset.rows[0].prompt[:1200])
             print("First training answer:")
-            print(train_rows[0]["messages"][2]["content"])
+            print(train_traversal_dataset.rows[0].answer)
         else:
             raise RuntimeError(
                 "No ECtHR traversal training rows were generated. Check that --max-train-cases and "
@@ -370,19 +371,19 @@ def build_or_load_tokenized_datasets(
             )
 
         train_dataset = tokenize_dataset(
-            Dataset.from_list(train_rows),
+            Dataset.from_list(train_traversal_dataset.to_records()),
             tokenizer,
             args.max_length,
             desc="Tokenizing traversal train examples",
         )
         eval_dataset = (
             tokenize_dataset(
-                Dataset.from_list(eval_rows),
+                Dataset.from_list(eval_traversal_dataset.to_records()),
                 tokenizer,
                 args.max_length,
                 desc="Tokenizing traversal eval examples",
             )
-            if eval_rows
+            if eval_traversal_dataset
             else None
         )
         if len(train_dataset) == 0:
@@ -395,10 +396,12 @@ def build_or_load_tokenized_datasets(
         train_dataset.save_to_disk(str(tmp_dir / "train"))
         if eval_dataset is not None:
             eval_dataset.save_to_disk(str(tmp_dir / "eval"))
+        train_traversal_dataset.to_json_path(tmp_dir / "raw_train_traversal_dataset.json")
+        eval_traversal_dataset.to_json_path(tmp_dir / "raw_eval_traversal_dataset.json")
 
         stats = {
-            "train": train_stats,
-            "eval": eval_stats,
+            "train": train_traversal_dataset.stats.to_dict(),
+            "eval": eval_traversal_dataset.stats.to_dict(),
             "train_dataset_rows": len(train_dataset),
             "eval_dataset_rows": 0 if eval_dataset is None else len(eval_dataset),
         }

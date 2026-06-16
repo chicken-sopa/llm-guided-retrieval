@@ -286,6 +286,8 @@ Notes
 
 -------------------------------------------- Training command ------------------------------------------------------------------------------
 
+
+QWEN2.5-1.5B-Instruct
 source venv/bin/activate
 
 OMP_NUM_THREADS=12 \
@@ -323,6 +325,86 @@ torchrun --standalone --nproc_per_node=4 \
   --overwrite-dataset-cache
 
 
+QWEN3.5-4B example 
+
+source venv/bin/activate
+
+OMP_NUM_THREADS=12 \
+MKL_NUM_THREADS=12 \
+TOKENIZERS_PARALLELISM=true \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+torchrun --standalone --nproc_per_node=4 \
+  src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
+  --model-id Qwen/Qwen3.5-4B\
+  --output-dir src/llm_rl_playground/outputs/qwen3.5-4B \
+  --ecthr-config alleged-violation-prediction \
+  --train-split train \
+  --eval-split validation \
+  --max-train-cases 9000 \
+  --max-train-examples 54000 \
+  --max-eval-cases 1000 \
+  --max-eval-examples 6000 \
+  --max-examples-per-case 8 \
+  --max-length 2048 \
+  --max-fact-chars 4000 \
+  --max-child-desc-chars 700 \
+  --max-path-chars 700 \
+  --per-device-train-batch-size 4 \
+  --per-device-eval-batch-size 4 \
+  --gradient-accumulation-steps 4 \
+  --lora-r 16 \
+  --lora-alpha 32 \
+  --lora-dropout 0.05 \
+  --num-train-epochs 2 \
+  --learning-rate 2e-4 \
+  --logging-steps 5 \
+  --save-steps 250 \
+  --save-total-limit 3 \
+  --use-4bit \
+  --overwrite-dataset-cache
+
+
+
+
+source venv/bin/activate
+
+OMP_NUM_THREADS=12 \
+MKL_NUM_THREADS=12 \
+TOKENIZERS_PARALLELISM=true \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+torchrun --standalone --nproc_per_node=4 \
+  src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
+  --model-id Qwen/Qwen3-4B-Instruct-2507\
+  --output-dir src/llm_rl_playground/outputs/qwen3.5-4B-Instruct \
+  --ecthr-config alleged-violation-prediction \
+  --train-split train \
+  --eval-split validation \
+  --max-train-cases 9000 \
+  --max-train-examples 54000 \
+  --max-eval-cases 1000 \
+  --max-eval-examples 6000 \
+  --max-examples-per-case 8 \
+  --max-length 2048 \
+  --max-fact-chars 4000 \
+  --max-child-desc-chars 700 \
+  --max-path-chars 700 \
+  --per-device-train-batch-size 4 \
+  --per-device-eval-batch-size 4 \
+  --gradient-accumulation-steps 4 \
+  --lora-r 16 \
+  --lora-alpha 32 \
+  --lora-dropout 0.05 \
+  --num-train-epochs 2 \
+  --learning-rate 2e-4 \
+  --logging-steps 5 \
+  --save-steps 250 \
+  --save-total-limit 3 \
+  --use-4bit \
+  --overwrite-dataset-cache
+
+
+
+
 
 -------------------------------------------- Test comparision -------------------------------------------------------------------------- 
 source logs/vllm_load_balanced_env.sh
@@ -350,3 +432,55 @@ PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_mult
   --ecthr-eval-max-concurrent-calls 24 \
   --ecthr-eval-parse-max-concurrent-calls 32 \
   --ecthr-eval-use-llm-selector
+
+
+source logs/vllm_load_balanced_env.sh
+
+OMP_NUM_THREADS=12 \
+MKL_NUM_THREADS=12 \
+TOKENIZERS_PARALLELISM=true \
+PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
+  --skip-training \
+  --run-ecthr-batched-eval \
+  --compare-base-model \
+  --ecthr-eval-llm-api-backend vllm \
+  --ecthr-eval-vllm-base-url "$VLLM_BASE_URL" \
+  --model-id Qwen/Qwen3.5-4B \
+  --ecthr-eval-model-id "$LATTICE_VLLM_MODEL" \
+  --ecthr-eval-base-model-id Qwen/Qwen3.5-4B \
+  --output-dir src/llm_rl_playground/outputs/qwen3.5-4B \
+  --ecthr-config alleged-violation-prediction \
+  --eval-split validation \
+  --ecthr-eval-start 0 \
+  --ecthr-eval-n-cases 1000 \
+  --ecthr-eval-num-iters 10 \
+  --ecthr-eval-top-k-leaves 10 \
+  --ecthr-eval-prediction-min-score 0.4 \
+  --ecthr-eval-max-concurrent-calls 24 \
+  --ecthr-eval-parse-max-concurrent-calls 32 
+
+
+  source logs/vllm_load_balanced_env.sh
+
+OMP_NUM_THREADS=12 \
+MKL_NUM_THREADS=12 \
+TOKENIZERS_PARALLELISM=true \
+PYTHONPATH=src python src/llm_rl_playground/train_ecthr_tree_traversal_lora_multi_gpu.py \
+  --skip-training \
+  --run-ecthr-batched-eval \
+  --compare-base-model \
+  --ecthr-eval-llm-api-backend vllm \
+  --ecthr-eval-vllm-base-url "$VLLM_BASE_URL" \
+  --model-id Qwen/Qwen3-4B-Instruct-2507 \
+  --ecthr-eval-model-id "$LATTICE_VLLM_MODEL" \
+  --ecthr-eval-base-model-id Qwen/Qwen3-4B-Instruct-2507 \
+  --output-dir src/llm_rl_playground/outputs/qwen3.5-4B-Instruct\
+  --ecthr-config alleged-violation-prediction \
+  --eval-split validation \
+  --ecthr-eval-start 0 \
+  --ecthr-eval-n-cases 1000 \
+  --ecthr-eval-num-iters 10 \
+  --ecthr-eval-top-k-leaves 10 \
+  --ecthr-eval-prediction-min-score 0.4 \
+  --ecthr-eval-max-concurrent-calls 24 \
+  --ecthr-eval-parse-max-concurrent-calls 32 

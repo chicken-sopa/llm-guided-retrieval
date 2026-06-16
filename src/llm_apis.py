@@ -22,6 +22,7 @@ from openai import AsyncOpenAI
 
 from utils import validate_genai_response_constraint
 
+
 async def _run_and_return_index(index, coro):
     try:
         result = await coro
@@ -807,6 +808,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         max_retries: int = 3,
         logger: Optional[logging.Logger] = None,
         log_api_calls: bool = False,
+        offline_batch_threshold: int = 100,
         **kwargs: Any,
     ):
         if api_key is None:
@@ -819,6 +821,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         self.client = AsyncOpenAI(api_key=self.api_key, timeout=self.timeout)
         self.default_config = {}
         self.log_api_calls = log_api_calls
+        self.offline_batch_threshold = int(offline_batch_threshold)
         self.api_call_logger, self.api_call_log_path = _build_api_call_logger(
             self.logger,
             logger_name_suffix="openai_api_calls",
@@ -826,9 +829,10 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         ) if self.log_api_calls else (None, None)
 
         self.logger.info(
-            "Initialized OpenAI Responses client with model: %s (log_api_calls=%s)",
+            "Initialized OpenAI Responses client with model: %s (log_api_calls=%s, offline_batch_threshold=%s)",
             self.model_name,
             self.log_api_calls,
+            self.offline_batch_threshold,
         )
         if self.log_api_calls and self.api_call_log_path is not None:
             self.logger.info("OpenAI prompt/response log file: %s", self.api_call_log_path)
@@ -867,6 +871,12 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         config_params.pop('parse_max_concurrent_calls', None)
         config_params.pop('response_mime_type', None)
         config_params.pop('thinking_config', None)
+        config_params.pop('show_error_logs', None)
+        config_params.pop('offline_batch_threshold', None)
+        config_params.pop('offline_batch_dir', None)
+        config_params.pop('offline_batch_name', None)
+        config_params.pop('offline_batch_poll_seconds', None)
+        config_params.pop('offline_batch_completion_window', None)
 
         response_schema = config_params.pop('response_schema', None)
 
@@ -913,6 +923,242 @@ class OpenAIResponsesAPI(LanguageModelAPI):
     def update_config(self, **kwargs: Any) -> None:
         self.default_config.update(kwargs)
         self.logger.info(f"Updated config: {kwargs}")
+
+    def _default_offline_batch_dir(self) -> Path:
+        log_path = _resolve_log_file_path(self.logger)
+        if log_path is not None:
+            return log_path.parent / "openai_batch_waves"
+        return Path("openai_batch_waves")
+
+    @staticmethod
+    def _extract_response_text(response: Any) -> str:
+        if isinstance(response, dict):
+            text = response.get('output_text')
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+
+            text_parts = []
+            for item in response.get('output') or []:
+                for content in item.get('content') or []:
+                    if content.get('type') == 'output_text':
+                        content_text = content.get('text')
+                        if content_text:
+                            text_parts.append(content_text)
+            return ''.join(text_parts).strip()
+
+        return _extract_openai_response_text(response)
+
+    @staticmethod
+    def _batch_file_text(file_content: Any) -> str:
+        text = getattr(file_content, "text", None)
+        if isinstance(text, str):
+            return text
+        content = getattr(file_content, "content", None)
+        if isinstance(content, bytes):
+            return content.decode("utf-8")
+        if isinstance(file_content, bytes):
+            return file_content.decode("utf-8")
+        return str(file_content)
+
+    @staticmethod
+    def _model_dump_for_json(value: Any) -> dict[str, Any]:
+        if hasattr(value, "model_dump"):
+            return value.model_dump()
+        if hasattr(value, "dict"):
+            return value.dict()
+        if isinstance(value, dict):
+            return value
+        return dict(getattr(value, "__dict__", {}))
+
+    def _openai_request_body_for_batch(self, prompt: Any, prompt_index: int, prompt_count: int, kwargs: dict[str, Any]) -> dict[str, Any]:
+        config_params = {**self.default_config}
+        for key, value in kwargs.items():
+            if isinstance(value, (list, tuple)) and len(value) == prompt_count:
+                config_params[key] = value[prompt_index]
+            else:
+                config_params[key] = value
+
+        for local_only_key in [
+            "max_retries",
+            "timeout",
+            "prompt_index",
+            "parse_max_concurrent_calls",
+            "response_mime_type",
+            "thinking_config",
+            "show_error_logs",
+            "max_concurrent_calls",
+            "print_summary_report",
+            "staggering_delay",
+            "use_offline_batch",
+            "offline_batch_dir",
+            "offline_batch_name",
+            "offline_batch_poll_seconds",
+            "offline_batch_completion_window",
+        ]:
+            config_params.pop(local_only_key, None)
+
+        response_schema = config_params.pop("response_schema", None)
+        request_body = {
+            "model": self.model_name,
+            "input": prompt,
+            **config_params,
+        }
+        if response_schema:
+            request_body["text"] = {
+                "format": normalize_openai_schema(response_schema),
+            }
+        return request_body
+
+    def _write_offline_batch_requests(
+        self,
+        prompts: List[Any],
+        *,
+        batch_dir: Path,
+        batch_name: str,
+        kwargs: dict[str, Any],
+    ) -> tuple[Path, list[str]]:
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        request_path = batch_dir / f"{batch_name}_requests.jsonl"
+        custom_ids = []
+        with request_path.open("w", encoding="utf-8") as f:
+            for idx, prompt in enumerate(prompts):
+                custom_id = f"{batch_name}-prompt-{idx:06d}"
+                custom_ids.append(custom_id)
+                body = self._openai_request_body_for_batch(prompt, idx, len(prompts), kwargs)
+                f.write(
+                    json.dumps(
+                        {
+                            "custom_id": custom_id,
+                            "method": "POST",
+                            "url": "/v1/responses",
+                            "body": body,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        return request_path, custom_ids
+
+    def _parse_offline_batch_output(self, output_text: str, custom_ids: list[str]) -> list[str]:
+        outputs_by_custom_id = {}
+        for line in output_text.splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            custom_id = payload.get("custom_id")
+            response = payload.get("response") or {}
+            status_code = int(response.get("status_code") or 0)
+            if status_code and status_code >= 400:
+                outputs_by_custom_id[custom_id] = f"Error: {response.get('body') or response}"
+                continue
+            if payload.get("error"):
+                outputs_by_custom_id[custom_id] = f"Error: {payload['error']}"
+                continue
+            outputs_by_custom_id[custom_id] = self._extract_response_text(response.get("body") or {})
+
+        return [
+            outputs_by_custom_id.get(custom_id, f"Error: Missing Batch API output for {custom_id}")
+            for custom_id in custom_ids
+        ]
+
+    async def _run_offline_batch(
+        self,
+        prompts: List[Any],
+        *,
+        batch_dir: str | Path | None = None,
+        batch_name: str | None = None,
+        poll_seconds: float = 60.0,
+        completion_window: str = "24h",
+        **kwargs: Any,
+    ) -> List[str]:
+        """Run prompts through OpenAI Batch API and return texts in input order."""
+        if not prompts:
+            return []
+
+        batch_dir = Path(batch_dir) if batch_dir is not None else self._default_offline_batch_dir()
+        batch_name = batch_name or f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(prompts)}"
+        request_path, custom_ids = self._write_offline_batch_requests(
+            prompts,
+            batch_dir=batch_dir,
+            batch_name=batch_name,
+            kwargs=kwargs,
+        )
+        self.logger.info("Submitting OpenAI offline batch '%s' with %s prompts: %s", batch_name, len(prompts), request_path)
+
+        with request_path.open("rb") as f:
+            input_file = await self.client.files.create(file=f, purpose="batch")
+
+        batch = await self.client.batches.create(
+            input_file_id=input_file.id,
+            endpoint="/v1/responses",
+            completion_window=completion_window,
+            metadata={"batch_name": batch_name},
+        )
+        status_path = batch_dir / f"{batch_name}_status.json"
+
+        terminal_statuses = {"completed", "failed", "expired", "cancelled", "cancelling"}
+        while getattr(batch, "status", None) not in terminal_statuses:
+            status_path.write_text(
+                json.dumps(self._model_dump_for_json(batch), ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            self.logger.info("OpenAI offline batch '%s' status: %s", batch_name, getattr(batch, "status", None))
+            await asyncio.sleep(float(poll_seconds))
+            batch = await self.client.batches.retrieve(batch.id)
+
+        status_path.write_text(
+            json.dumps(self._model_dump_for_json(batch), ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        if getattr(batch, "status", None) != "completed":
+            raise RuntimeError(f"OpenAI offline batch {batch.id} ended with status {getattr(batch, 'status', None)}")
+
+        output_file_id = getattr(batch, "output_file_id", None)
+        if not output_file_id:
+            raise RuntimeError(f"OpenAI offline batch {batch.id} completed without output_file_id")
+
+        output_content = await self.client.files.content(output_file_id)
+        output_text = self._batch_file_text(output_content)
+        output_path = batch_dir / f"{batch_name}_output.jsonl"
+        output_path.write_text(output_text, encoding="utf-8")
+
+        error_file_id = getattr(batch, "error_file_id", None)
+        if error_file_id:
+            error_content = await self.client.files.content(error_file_id)
+            (batch_dir / f"{batch_name}_errors.jsonl").write_text(self._batch_file_text(error_content), encoding="utf-8")
+
+        self.logger.info("OpenAI offline batch '%s' completed. Output: %s", batch_name, output_path)
+        return self._parse_offline_batch_output(output_text, custom_ids)
+
+    async def run_batch(self, prompts: List[str], **kwargs: Any) -> List[str]:
+        use_offline_batch = kwargs.pop("use_offline_batch", None)
+        offline_batch_threshold = self.offline_batch_threshold
+        should_use_offline_batch = (
+            bool(use_offline_batch)
+            if use_offline_batch is not None
+            else offline_batch_threshold > 0 and len(prompts) >= offline_batch_threshold
+        )
+
+        if should_use_offline_batch:
+            batch_dir = kwargs.pop("offline_batch_dir", None)
+            batch_name = kwargs.pop("offline_batch_name", None)
+            poll_seconds = float(kwargs.pop("offline_batch_poll_seconds", 60.0))
+            completion_window = kwargs.pop("offline_batch_completion_window", "24h")
+            self.logger.info(
+                "Prompt count %s reached offline batch threshold %s; using OpenAI Batch API.",
+                len(prompts),
+                offline_batch_threshold,
+            )
+            return await self._run_offline_batch(
+                prompts,
+                batch_dir=batch_dir,
+                batch_name=batch_name,
+                poll_seconds=poll_seconds,
+                completion_window=completion_window,
+                **kwargs,
+            )
+
+        return await super().run_batch(prompts, **kwargs)
 
 #@title `LocalModelAPI` implementation
 class LocalModelAPI(LanguageModelAPI):

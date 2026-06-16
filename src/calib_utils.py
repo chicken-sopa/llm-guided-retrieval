@@ -194,7 +194,12 @@ class CalibModel:
         for orig_idx, compact_idx in new_mapping.items():
             full_theta[orig_idx] = theta_compact[compact_idx]
         self.theta_full = full_theta.numpy() * self.a
-        self.theta_full /= self.theta_full.max()  # normalize to max 1.0
+        self.theta_full = np.nan_to_num(self.theta_full, nan=0.0, posinf=0.0, neginf=0.0)
+        max_theta = self.theta_full.max()
+        if max_theta > 0:
+            self.theta_full /= max_theta  # normalize to max 1.0
+        else:
+            self.theta_full = np.zeros_like(self.theta_full)
         self.new_mapping = new_mapping  # keep for reference
         self.trained = True
 

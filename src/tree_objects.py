@@ -349,7 +349,7 @@ class InferSample(object):
   def get_step_prompts(self):
     inputs = []
     top_preds = self.get_top_predictions(k=None, rel_fn=self.get_rel_fn(return_calibrated_rel=True))
-    assert all([s <= 1.0001 for _, s in top_preds]), f'Top predictions not normalized: {top_preds}'
+    assert all([np.isfinite(s) and s <= 1.0001 for _, s in top_preds]), f'Top predictions not normalized: {top_preds}'
     if self.num_leaf_calib and len(top_preds) > self.num_leaf_calib:
       theta = np.array([max(s, -1) for _, s in top_preds])
       th = get_bimodal_gmm_intrsxn(theta)
