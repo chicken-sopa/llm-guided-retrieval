@@ -407,6 +407,41 @@ torchrun --standalone --nproc_per_node=4 \
 
 
 -------------------------------------------- Test comparision -------------------------------------------------------------------------- 
+Standalone comparison script:
+
+PYTHONPATH=src python src/llm_rl_playground/test_ecthr_models.py \
+  --include-base-models \
+  --eval-split validation \
+  --start 0 \
+  --n-cases 1000 \
+  --num-iters 10 \
+  --top-k-leaves 10 \
+  --prediction-min-score 0.4 \
+  --max-concurrent-calls 1
+
+By default, if no --run entries are provided, this script auto-discovers complete
+local LoRA/QLoRA adapters in src/llm_rl_playground/outputs and evaluates each of
+them. Use --include-base-models to also compare each adapter against its base
+model with no adapter.
+
+Explicit local runs:
+
+PYTHONPATH=src python src/llm_rl_playground/test_ecthr_models.py \
+  --run label=qwen25_adapter,backend=localModel,model=Qwen/Qwen2.5-1.5B-Instruct,adapter=src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora \
+  --run label=qwen25_base,backend=localModel,model=Qwen/Qwen2.5-1.5B-Instruct \
+  --n-cases 100 \
+  --num-iters 10
+
+Explicit vLLM served runs:
+
+PYTHONPATH=src python src/llm_rl_playground/test_ecthr_models.py \
+  --run label=qwen25_served_adapter,backend=vllm,model="$LATTICE_VLLM_MODEL",base_url="$VLLM_BASE_URL" \
+  --run label=qwen25_served_base,backend=vllm,model=Qwen/Qwen2.5-1.5B-Instruct,base_url="$VLLM_BASE_URL" \
+  --n-cases 1000 \
+  --num-iters 10 \
+  --max-concurrent-calls 24 \
+  --parse-max-concurrent-calls 32
+
 source logs/vllm_load_balanced_env.sh
 
 OMP_NUM_THREADS=12 \
