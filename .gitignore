@@ -8,3 +8,5 @@ __pycache__/
 .env
 .ipynb_checkpoints/
 .venv
+
+src/tree_construction/EU_conventions_example/eu_conventions_tree_traversal_examples.ipynb

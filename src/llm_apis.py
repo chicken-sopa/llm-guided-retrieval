@@ -810,7 +810,7 @@ class OpenAIResponsesAPI(LanguageModelAPI):
         max_retries: int = 3,
         logger: Optional[logging.Logger] = None,
         log_api_calls: bool = False,
-        offline_batch_threshold: int = 8000,
+        offline_batch_threshold: int = 800000,
         offline_batch_max_file_bytes: int = _DEFAULT_OFFLINE_BATCH_MAX_FILE_BYTES,
         **kwargs: Any,
     ):
