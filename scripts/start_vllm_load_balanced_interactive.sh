@@ -22,6 +22,7 @@ default_gpu_mem_util="0.90"
 default_dtype="half"
 default_adapter_name="ecthr_adapter"
 default_max_lora_rank="64"
+default_think_mode = "false"  
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -122,6 +123,7 @@ for ((i = 0; i < num_gpus; i++)); do
         --dtype "$dtype"
         --gpu-memory-utilization "$gpu_mem_util"
         --max-model-len "$max_model_len"
+        --default-chat-template-kwargs '{"enable_thinking": '$default_think_mode'}'
     )
 
     if [[ -n "$adapter_path" ]]; then
