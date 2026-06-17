@@ -22,7 +22,7 @@ BASE_PORT=8000
 NUM_GPUS="${3:-4}"
 GPU_MEM_UTIL=0.95
 # Specify GPU IDs to use
-GPU_IDS="${4:-(0 1 3 4)}"
+GPU_IDS=(0 1 3 4)
 MAX_MODEL_LEN=16384
 
 # Colors for output
