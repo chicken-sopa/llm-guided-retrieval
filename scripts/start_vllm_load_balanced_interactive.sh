@@ -22,7 +22,7 @@ default_gpu_mem_util="0.90"
 default_dtype="half"
 default_adapter_name="ecthr_adapter"
 default_max_lora_rank="64"
-default_think_mode = "false"  
+default_think_mode="false"  
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
