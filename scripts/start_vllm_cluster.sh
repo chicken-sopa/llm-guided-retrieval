@@ -8,7 +8,7 @@
 #   ./start_vllm_cluster.sh                                    # Data parallel with default model
 #   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data   # Data parallel
 #   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor # Tensor parallel
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 2 (1,3) # Tensor parallel with numb of server and ids
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 # Tensor parallel with numb of server and ids
 # Modes:
 #   data   - Run multiple servers (one per GPU) for maximum throughput
 #   tensor - Run single server with model split across GPUs for large models
@@ -19,10 +19,20 @@ set -e
 MODEL="${1:-Qwen/Qwen3-VL-8B-Instruct}"
 MODE="${2:-data}"  # "data" or "tensor"
 BASE_PORT=8000
-NUM_GPUS="${3:-4}"
 GPU_MEM_UTIL=0.95
-# Specify GPU IDs to use
-GPU_IDS=(0 1 3 4)
+# Specify GPU IDs to use (comma-separated, e.g. "0,1,3,4")
+GPU_IDS_RAW="${3:-0,1,2,3}"
+IFS=',' read -r -a GPU_IDS <<< "$GPU_IDS_RAW"
+NUM_GPUS="${4:-${#GPU_IDS[@]}}"
+
+if [[ "$NUM_GPUS" -ne "${#GPU_IDS[@]}" ]]; then
+  echo "Warning: NUM_GPUS ($NUM_GPUS) doesn't match number of GPU_IDS passed (${#GPU_IDS[@]}): ${GPU_IDS[*]}" >&2
+fi
+
+
+
+
+
 MAX_MODEL_LEN=16384
 
 # Colors for output
