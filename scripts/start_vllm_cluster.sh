@@ -70,7 +70,6 @@ if [[ "$MODE" == "tensor" ]]; then
         --host 0.0.0.0 \
         --tensor-parallel-size $NUM_GPUS \
         --gpu-memory-utilization $GPU_MEM_UTIL \
-        --disable-log-requests \
         --max-model-len $MAX_MODEL_LEN \
         > $LOG_FILE 2>&1 &
 
