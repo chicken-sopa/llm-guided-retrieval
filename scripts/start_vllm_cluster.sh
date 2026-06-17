@@ -23,7 +23,7 @@ NUM_GPUS="${3:-4}"
 GPU_MEM_UTIL=0.95
 # Specify GPU IDs to use
 GPU_IDS="${4:-(0 1 3 4)}"
-MAX_MODEL_LEN= 16384
+MAX_MODEL_LEN=16384
 
 # Colors for output
 GREEN='\033[0;32m'
