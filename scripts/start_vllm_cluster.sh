@@ -2,13 +2,21 @@
 # Script to start vLLM servers in data parallel or tensor parallel mode
 #
 # Usage:
-#   ./start_vllm_cluster.sh [MODEL] [MODE]
+#   ./start_vllm_cluster.sh [MODEL] [MODE] [GPU_IDS] [NUM_GPUS] [ENFORCE_EAGER]
 #
 # Examples:
-#   ./start_vllm_cluster.sh                                    # Data parallel with default model
-#   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data   # Data parallel
-#   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor # Tensor parallel
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 # Tensor parallel with numb of server and ids
+#   ./start_vllm_cluster.sh                                              # Data parallel with default model
+#   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data            # Data parallel
+#   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor          # Tensor parallel
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2        # Tensor parallel, GPUs 1 and 3
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 true   # Same, force eager mode
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 false  # Same, allow CUDA graphs
+#
+# ENFORCE_EAGER (5th arg, default "auto"):
+#   auto  - always enabled in tensor mode (recommended for large models)
+#   true  - always skip CUDA graph compilation
+#   false - allow CUDA graph compilation (may hang if compilation takes >60s)
+#
 # Modes:
 #   data   - Run multiple servers (one per GPU) for maximum throughput
 #   tensor - Run single server with model split across GPUs for large models
@@ -34,6 +42,8 @@ fi
 
 
 MAX_MODEL_LEN=16384
+# Whether to skip CUDA graph compilation (avoids EngineCore IPC timeout on large models)
+ENFORCE_EAGER="${5:-auto}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -74,6 +84,16 @@ if [[ "$MODE" == "tensor" ]]; then
 
     echo -e "${GREEN}Starting tensor parallel server on GPUs: $GPU_LIST${NC}"
 
+    # For large models in tensor parallel mode, CUDA graph compilation can take
+    # several minutes, causing vLLM's EngineCore IPC watchdog to time out and
+    # report "No available shared memory broadcast block found in 60 seconds".
+    # --enforce-eager bypasses graph compilation entirely (slight throughput cost).
+    EAGER_FLAG=""
+    if [[ "$ENFORCE_EAGER" == "auto" || "$ENFORCE_EAGER" == "1" || "$ENFORCE_EAGER" == "true" ]]; then
+        EAGER_FLAG="--enforce-eager"
+        echo -e "${YELLOW}Note: enforce-eager enabled — CUDA graph compilation skipped.${NC}"
+    fi
+
     CUDA_VISIBLE_DEVICES=$GPU_LIST nohup python -m vllm.entrypoints.openai.api_server \
         --model $MODEL \
         --port $BASE_PORT \
@@ -81,6 +101,7 @@ if [[ "$MODE" == "tensor" ]]; then
         --tensor-parallel-size $NUM_GPUS \
         --gpu-memory-utilization $GPU_MEM_UTIL \
         --max-model-len $MAX_MODEL_LEN \
+        $EAGER_FLAG \
         > $LOG_FILE 2>&1 &
 
     PID=$!
