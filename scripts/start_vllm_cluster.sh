@@ -215,7 +215,6 @@ else
             --port $PORT \
             --host 0.0.0.0 \
             --gpu-memory-utilization $GPU_MEM_UTIL \
-            --disable-log-requests \
             --max-model-len $MAX_MODEL_LEN \
             --max-num-seqs $MAX_NUM_SEQS \
             > $LOG_FILE 2>&1 &
