@@ -21,7 +21,7 @@
 #   ./start_vllm_cluster.sh
 #   ./start_vllm_cluster.sh --model "Qwen/Qwen3-VL-8B-Instruct" --vllm-mode data
 #   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode tensor --gpu-ids 0,1 --num-gpus 2
-#   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode data --gpu-ids 0,1 --num-gpus 2  --gpu-memory-utilization 0.95 --max-model-len 8192 --max-num-seqs 128
+#   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode data --gpu-ids 0,1 --num-gpus 2  --gpu-mem-util 0.95 --max-model-len 8192 --max-num-seqs 128
 #   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode tensor --gpu-ids 0,1 --disable-custom-ar false
 #
 # enforce-eager (auto|true|false, default "auto"):
