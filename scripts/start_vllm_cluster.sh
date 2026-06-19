@@ -2,23 +2,35 @@
 # Script to start vLLM servers in data parallel or tensor parallel mode
 #
 # Usage:
-#   ./start_vllm_cluster.sh [MODEL] [MODE] [GPU_IDS] [NUM_GPUS] [ENFORCE_EAGER] [DISABLE_CUSTOM_AR]
+#   ./start_vllm_cluster.sh [OPTIONS]
+#
+# Options (all optional; unspecified ones use the default):
+#   --model NAME              HF model id to serve            (default: Qwen/Qwen3-VL-8B-Instruct)
+#   --vllm-mode data|tensor   Parallelism mode                (default: data)
+#   --gpu-ids LIST            Comma-separated GPU ids         (default: 0,1,2,3)
+#   --num-gpus N              Number of GPUs to use           (default: count of --gpu-ids)
+#   --base-port PORT          First server port               (default: 8000)
+#   --gpu-mem-util FLOAT      GPU memory utilization 0-1      (default: 0.90)
+#   --max-model-len N         Max context length              (default: 16384)
+#   --max-num-seqs N          Max concurrent seqs per server  (default: 32)
+#   --enforce-eager auto|true|false      Skip CUDA graph capture (default: auto)
+#   --disable-custom-ar auto|true|false  Use NCCL all-reduce     (default: auto)
+#   -h, --help                Show this help and exit
 #
 # Examples:
-#   ./start_vllm_cluster.sh                                                # Data parallel with default model
-#   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data              # Data parallel
-#   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor            # Tensor parallel
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2          # Tensor parallel, GPUs 0 and 1
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2 true     # Same, force eager mode
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2 auto false # Same, keep custom all-reduce
+#   ./start_vllm_cluster.sh
+#   ./start_vllm_cluster.sh --model "Qwen/Qwen3-VL-8B-Instruct" --vllm-mode data
+#   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode tensor --gpu-ids 0,1 --num-gpus 2
+#   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode data --gpu-ids 0,1 --num-gpus 2  --gpu-memory-utilization 0.95 --max-model-len 8192 --max-num-seqs 128
+#   ./start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode tensor --gpu-ids 0,1 --disable-custom-ar false
 #
-# ENFORCE_EAGER (5th arg, default "auto"):
-#   auto  - always enabled in tensor mode (recommended for large models)
+# enforce-eager (auto|true|false, default "auto"):
+#   auto  - enabled in tensor mode (recommended for large models)
 #   true  - always skip CUDA graph compilation
 #   false - allow CUDA graph compilation (may hang if compilation takes >60s)
 #
-# DISABLE_CUSTOM_AR (6th arg, default "auto"):
-#   auto  - always enabled in tensor mode (recommended; avoids Blackwell hangs)
+# disable-custom-ar (auto|true|false, default "auto"):
+#   auto  - enabled in tensor mode (recommended; avoids Blackwell hangs)
 #   true  - always disable custom all-reduce (use NCCL all-reduce)
 #   false - keep vLLM's custom all-reduce (may hang on some GPUs/topologies)
 #
@@ -28,32 +40,6 @@
 
 set -e
 
-# Configuration
-MODEL="${1:-Qwen/Qwen3-VL-8B-Instruct}"
-MODE="${2:-data}"  # "data" or "tensor"
-BASE_PORT=8000
-GPU_MEM_UTIL=0.90
-# Specify GPU IDs to use (comma-separated, e.g. "0,1,3,4")
-GPU_IDS_RAW="${3:-0,1,2,3}"
-IFS=',' read -r -a GPU_IDS <<< "$GPU_IDS_RAW"
-NUM_GPUS="${4:-${#GPU_IDS[@]}}"
-
-if [[ "$NUM_GPUS" -ne "${#GPU_IDS[@]}" ]]; then
-  echo "Warning: NUM_GPUS ($NUM_GPUS) doesn't match number of GPU_IDS passed (${#GPU_IDS[@]}): ${GPU_IDS[*]}" >&2
-fi
-
-
-
-
-
-MAX_MODEL_LEN=16384
-# Whether to skip CUDA graph compilation (avoids EngineCore IPC timeout on large models)
-ENFORCE_EAGER="${5:-auto}"
-# Whether to disable vLLM's custom all-reduce kernel (falls back to NCCL).
-# Custom all-reduce can deadlock on some GPUs/topologies (e.g. Blackwell sm_100),
-# causing tensor parallel to hang silently after weight loading.
-DISABLE_CUSTOM_AR="${6:-auto}"
-
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -61,10 +47,62 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+print_usage() {
+    sed -n '2,39p' "$0" | sed 's/^#\s\?//'
+}
+
+# ---- Defaults ----
+MODEL="Qwen/Qwen3-VL-8B-Instruct"
+MODE="data"                 # "data" or "tensor"
+BASE_PORT=8000
+GPU_MEM_UTIL=0.90
+GPU_IDS_RAW="0,1,2,3"        # comma-separated GPU ids, e.g. "0,1,3,4"
+NUM_GPUS=""                 # empty => derive from GPU_IDS count
+MAX_MODEL_LEN=16384
+# Max concurrent sequences per server. Lower values shrink the CUDA-graph
+# capture / activation peak, which prevents OOM when weights nearly fill the GPU
+# (e.g. FP8-27B on a 48GB card).
+MAX_NUM_SEQS=32
+# Whether to skip CUDA graph compilation (avoids EngineCore IPC timeout on large models)
+ENFORCE_EAGER="auto"
+# Whether to disable vLLM's custom all-reduce kernel (falls back to NCCL).
+# Custom all-reduce can deadlock on some GPUs/topologies (e.g. Blackwell sm_100),
+# causing tensor parallel to hang silently after weight loading.
+DISABLE_CUSTOM_AR="auto"
+
+# ---- Parse named flags ----
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --model)             MODEL="$2"; shift 2 ;;
+        --vllm-mode|--mode)  MODE="$2"; shift 2 ;;
+        --gpu-ids)           GPU_IDS_RAW="$2"; shift 2 ;;
+        --num-gpus)          NUM_GPUS="$2"; shift 2 ;;
+        --base-port)         BASE_PORT="$2"; shift 2 ;;
+        --gpu-mem-util)      GPU_MEM_UTIL="$2"; shift 2 ;;
+        --max-model-len)     MAX_MODEL_LEN="$2"; shift 2 ;;
+        --max-num-seqs)      MAX_NUM_SEQS="$2"; shift 2 ;;
+        --enforce-eager)     ENFORCE_EAGER="$2"; shift 2 ;;
+        --disable-custom-ar) DISABLE_CUSTOM_AR="$2"; shift 2 ;;
+        -h|--help)           print_usage; exit 0 ;;
+        *)
+            echo -e "${RED}Error: unknown option '$1'${NC}" >&2
+            echo "Run '$0 --help' for usage." >&2
+            exit 1 ;;
+    esac
+done
+
+# Derive GPU array / count
+IFS=',' read -r -a GPU_IDS <<< "$GPU_IDS_RAW"
+NUM_GPUS="${NUM_GPUS:-${#GPU_IDS[@]}}"
+
+if [[ "$NUM_GPUS" -ne "${#GPU_IDS[@]}" ]]; then
+  echo "Warning: NUM_GPUS ($NUM_GPUS) doesn't match number of GPU_IDS passed (${#GPU_IDS[@]}): ${GPU_IDS[*]}" >&2
+fi
+
 # Validate mode
 if [[ "$MODE" != "data" && "$MODE" != "tensor" ]]; then
-    echo -e "${RED}Error: MODE must be 'data' or 'tensor', got: $MODE${NC}"
-    echo "Usage: $0 [MODEL] [MODE]"
+    echo -e "${RED}Error: --vllm-mode must be 'data' or 'tensor', got: $MODE${NC}"
+    echo "Run '$0 --help' for usage."
     exit 1
 fi
 
@@ -120,6 +158,7 @@ if [[ "$MODE" == "tensor" ]]; then
         --tensor-parallel-size $NUM_GPUS \
         --gpu-memory-utilization $GPU_MEM_UTIL \
         --max-model-len $MAX_MODEL_LEN \
+        --max-num-seqs $MAX_NUM_SEQS \
         $EAGER_FLAG \
         $CUSTOM_AR_FLAG \
         > $LOG_FILE 2>&1 &
@@ -178,6 +217,7 @@ else
             --gpu-memory-utilization $GPU_MEM_UTIL \
             --disable-log-requests \
             --max-model-len $MAX_MODEL_LEN \
+            --max-num-seqs $MAX_NUM_SEQS \
             > $LOG_FILE 2>&1 &
 
         PID=$!
@@ -217,10 +257,17 @@ else
     echo -e "\n${BLUE}================================================${NC}"
     echo -e "${GREEN}Data Parallel Cluster Ready!${NC}"
     echo -e "${BLUE}================================================${NC}"
+    # Build comma-separated base_url list across all started servers
+    BASE_URLS=""
+    for i in $(seq 0 $((NUM_GPUS-1))); do
+        PORT=$((BASE_PORT + i))
+        BASE_URLS+="http://localhost:${PORT}/v1"
+        if [[ $i -lt $((NUM_GPUS-1)) ]]; then BASE_URLS+=","; fi
+    done
     echo -e "\nUsage in Python:"
     echo -e '  client = VllmAPI('
     echo -e '      model_name="'$MODEL'",'
-    echo -e '      base_url="http://localhost:8000/v1,http://localhost:8001/v1,http://localhost:8002/v1,http://localhost:8003/v1"'
+    echo -e '      base_url="'$BASE_URLS'"'
     echo -e '  )'
     echo -e "\nTo test: python test_vllm_cluster.py"
 fi
