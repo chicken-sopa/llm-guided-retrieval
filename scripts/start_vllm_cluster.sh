@@ -2,20 +2,25 @@
 # Script to start vLLM servers in data parallel or tensor parallel mode
 #
 # Usage:
-#   ./start_vllm_cluster.sh [MODEL] [MODE] [GPU_IDS] [NUM_GPUS] [ENFORCE_EAGER]
+#   ./start_vllm_cluster.sh [MODEL] [MODE] [GPU_IDS] [NUM_GPUS] [ENFORCE_EAGER] [DISABLE_CUSTOM_AR]
 #
 # Examples:
-#   ./start_vllm_cluster.sh                                              # Data parallel with default model
-#   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data            # Data parallel
-#   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor          # Tensor parallel
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2        # Tensor parallel, GPUs 1 and 3
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 true   # Same, force eager mode
-#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 1,3 2 false  # Same, allow CUDA graphs
+#   ./start_vllm_cluster.sh                                                # Data parallel with default model
+#   ./start_vllm_cluster.sh "Qwen/Qwen3-VL-8B-Instruct" data              # Data parallel
+#   ./start_vllm_cluster.sh "meta-llama/Llama-2-70b-hf" tensor            # Tensor parallel
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2          # Tensor parallel, GPUs 0 and 1
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2 true     # Same, force eager mode
+#   ./start_vllm_cluster.sh "Qwen/Qwen3.6-27B-FP8" tensor 0,1 2 auto false # Same, keep custom all-reduce
 #
 # ENFORCE_EAGER (5th arg, default "auto"):
 #   auto  - always enabled in tensor mode (recommended for large models)
 #   true  - always skip CUDA graph compilation
 #   false - allow CUDA graph compilation (may hang if compilation takes >60s)
+#
+# DISABLE_CUSTOM_AR (6th arg, default "auto"):
+#   auto  - always enabled in tensor mode (recommended; avoids Blackwell hangs)
+#   true  - always disable custom all-reduce (use NCCL all-reduce)
+#   false - keep vLLM's custom all-reduce (may hang on some GPUs/topologies)
 #
 # Modes:
 #   data   - Run multiple servers (one per GPU) for maximum throughput
@@ -27,7 +32,7 @@ set -e
 MODEL="${1:-Qwen/Qwen3-VL-8B-Instruct}"
 MODE="${2:-data}"  # "data" or "tensor"
 BASE_PORT=8000
-GPU_MEM_UTIL=0.95
+GPU_MEM_UTIL=0.90
 # Specify GPU IDs to use (comma-separated, e.g. "0,1,3,4")
 GPU_IDS_RAW="${3:-0,1,2,3}"
 IFS=',' read -r -a GPU_IDS <<< "$GPU_IDS_RAW"
@@ -44,6 +49,10 @@ fi
 MAX_MODEL_LEN=16384
 # Whether to skip CUDA graph compilation (avoids EngineCore IPC timeout on large models)
 ENFORCE_EAGER="${5:-auto}"
+# Whether to disable vLLM's custom all-reduce kernel (falls back to NCCL).
+# Custom all-reduce can deadlock on some GPUs/topologies (e.g. Blackwell sm_100),
+# causing tensor parallel to hang silently after weight loading.
+DISABLE_CUSTOM_AR="${6:-auto}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -94,6 +103,16 @@ if [[ "$MODE" == "tensor" ]]; then
         echo -e "${YELLOW}Note: enforce-eager enabled — CUDA graph compilation skipped.${NC}"
     fi
 
+    # vLLM's custom all-reduce kernel uses CUDA IPC peer access. On some GPUs
+    # (notably Blackwell sm_100) it deadlocks during the first all-reduce, making
+    # tensor parallel hang silently right after weight loading. Falling back to
+    # NCCL avoids this with negligible throughput cost for beam-search workloads.
+    CUSTOM_AR_FLAG=""
+    if [[ "$DISABLE_CUSTOM_AR" == "auto" || "$DISABLE_CUSTOM_AR" == "1" || "$DISABLE_CUSTOM_AR" == "true" ]]; then
+        CUSTOM_AR_FLAG="--disable-custom-all-reduce"
+        echo -e "${YELLOW}Note: custom all-reduce disabled — using NCCL all-reduce.${NC}"
+    fi
+
     CUDA_VISIBLE_DEVICES=$GPU_LIST nohup python -m vllm.entrypoints.openai.api_server \
         --model $MODEL \
         --port $BASE_PORT \
@@ -102,6 +121,7 @@ if [[ "$MODE" == "tensor" ]]; then
         --gpu-memory-utilization $GPU_MEM_UTIL \
         --max-model-len $MAX_MODEL_LEN \
         $EAGER_FLAG \
+        $CUSTOM_AR_FLAG \
         > $LOG_FILE 2>&1 &
 
     PID=$!
