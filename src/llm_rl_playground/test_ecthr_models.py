@@ -428,8 +428,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--auto-discover-adapters",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="When no --run is passed, evaluate adapter dirs under --adapter-outputs-dir.",
+        default=False,
+        help=(
+            "When no --run is passed, evaluate adapter dirs under --adapter-outputs-dir. "
+            "Off by default: with no adapter specified, no adapter is used."
+        ),
     )
     parser.add_argument(
         "--include-base-models",
