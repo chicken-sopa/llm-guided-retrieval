@@ -86,9 +86,15 @@ case "$BACKEND" in
 esac
 
 # ---- Derive label if not given ----
+# Falls back to LATTICE_VLLM_LABEL (set by start_vllm_cluster.sh's env file) if
+# present, otherwise a slug of the model name.
 if [[ -z "$LABEL" ]]; then
-    SLUG=$(echo "$MODEL" | sed 's#[^A-Za-z0-9._-]#-#g')
-    if [[ -n "$LORA" ]]; then LABEL="${SLUG}-lora"; else LABEL="${SLUG}-base"; fi
+    if [[ -n "$LATTICE_VLLM_LABEL" ]]; then
+        LABEL="$LATTICE_VLLM_LABEL"
+    else
+        SLUG=$(echo "$MODEL" | sed 's#[^A-Za-z0-9._-]#-#g')
+        if [[ -n "$LORA" ]]; then LABEL="${SLUG}-lora"; else LABEL="${SLUG}-base"; fi
+    fi
 fi
 
 # ---- Build the --run spec string ----

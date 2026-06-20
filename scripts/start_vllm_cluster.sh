@@ -13,9 +13,17 @@
 #   --gpu-mem-util FLOAT      GPU memory utilization 0-1      (default: 0.90)
 #   --max-model-len N         Max context length              (default: 16384)
 #   --max-num-seqs N          Max concurrent seqs per server  (default: 32)
+#   --label NAME              Run label for downstream eval    (default: slug of --model)
 #   --enforce-eager auto|true|false      Skip CUDA graph capture (default: auto)
 #   --disable-custom-ar auto|true|false  Use NCCL all-reduce     (default: auto)
 #   -h, --help                Show this help and exit
+#
+# On startup this writes logs/vllm_load_balanced_env.sh with:
+#   export VLLM_BASE_URL="<all server urls, comma-separated>"
+#   export LATTICE_VLLM_MODEL="<model>"
+#   export LATTICE_VLLM_LABEL="<label>"
+# Source it to feed run_ecthr_test.sh / the LATTICE eval:
+#   source logs/vllm_load_balanced_env.sh
 #
 # Examples:
 #   ./start_vllm_cluster.sh
@@ -48,7 +56,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 print_usage() {
-    sed -n '2,39p' "$0" | sed 's/^#\s\?//'
+    sed -n '2,47p' "$0" | sed 's/^#\s\?//'
 }
 
 # ---- Defaults ----
@@ -63,6 +71,8 @@ MAX_MODEL_LEN=16384
 # capture / activation peak, which prevents OOM when weights nearly fill the GPU
 # (e.g. FP8-27B on a 48GB card).
 MAX_NUM_SEQS=32
+# Run label exported for downstream eval (run_ecthr_test.sh). Empty => slug of model.
+LABEL=""
 # Whether to skip CUDA graph compilation (avoids EngineCore IPC timeout on large models)
 ENFORCE_EAGER="auto"
 # Whether to disable vLLM's custom all-reduce kernel (falls back to NCCL).
@@ -81,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         --gpu-mem-util)      GPU_MEM_UTIL="$2"; shift 2 ;;
         --max-model-len)     MAX_MODEL_LEN="$2"; shift 2 ;;
         --max-num-seqs)      MAX_NUM_SEQS="$2"; shift 2 ;;
+        --label)             LABEL="$2"; shift 2 ;;
         --enforce-eager)     ENFORCE_EAGER="$2"; shift 2 ;;
         --disable-custom-ar) DISABLE_CUSTOM_AR="$2"; shift 2 ;;
         -h|--help)           print_usage; exit 0 ;;
@@ -106,11 +117,28 @@ if [[ "$MODE" != "data" && "$MODE" != "tensor" ]]; then
     exit 1
 fi
 
+# Derive label from model if not provided (slugify: keep alnum . _ -)
+if [[ -z "$LABEL" ]]; then
+    LABEL=$(echo "$MODEL" | sed 's#[^A-Za-z0-9._-]#-#g')
+fi
+
 # Create logs directory
 mkdir -p logs
 
 # Save mode to file for stop script
 echo "$MODE" > logs/cluster_mode.txt
+
+# Write env file consumed by run_ecthr_test.sh / LATTICE eval.
+# Args: $1 = comma-separated base_url list
+write_env_file() {
+    local base_urls="$1"
+    cat > logs/vllm_load_balanced_env.sh <<EOF
+export VLLM_BASE_URL="${base_urls}"
+export LATTICE_VLLM_MODEL="${MODEL}"
+export LATTICE_VLLM_LABEL="${LABEL}"
+EOF
+    echo -e "${GREEN}Wrote logs/vllm_load_balanced_env.sh (source it to set VLLM_BASE_URL / LATTICE_VLLM_MODEL / LATTICE_VLLM_LABEL).${NC}"
+}
 
 if [[ "$MODE" == "tensor" ]]; then
     # ============================================
@@ -187,6 +215,9 @@ if [[ "$MODE" == "tensor" ]]; then
     echo -e '      model_name="'$MODEL'",'
     echo -e '      base_url="http://localhost:'$BASE_PORT'/v1"'
     echo -e '  )'
+
+    write_env_file "http://localhost:${BASE_PORT}/v1"
+
     echo -e "\nNote: Tensor parallelism provides lower throughput but enables larger models."
     echo -e "For maximum throughput with smaller models, use data parallel mode.\n"
 
@@ -268,6 +299,9 @@ else
     echo -e '      model_name="'$MODEL'",'
     echo -e '      base_url="'$BASE_URLS'"'
     echo -e '  )'
+
+    write_env_file "$BASE_URLS"
+
     echo -e "\nTo test: python test_vllm_cluster.py"
 fi
 
