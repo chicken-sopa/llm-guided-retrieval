@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+"""Run the ECtHR LATTICE evaluation for a SINGLE model on a chosen backend.
+
+Examples:
+  # vLLM-served base model (uses VLLM_BASE_URL env or --base-url)
+  python test_ecthr_models.py --backend vllm --model Qwen/Qwen3.6-27B-FP8 \
+      --base-url http://localhost:8000/v1 --n-cases 100 --num-iters 10
+
+  # Local HuggingFace model with a LoRA adapter
+  python test_ecthr_models.py --backend local --model Qwen/Qwen2.5-1.5B-Instruct \
+      --lora src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora
+
+  # OpenAI / Gemini
+  python test_ecthr_models.py --backend openai --model gpt-4.1
+"""
+
 import argparse
 import gc
 import json
 import os
-import pickle
 import re
 import sys
 import time
@@ -18,7 +32,7 @@ from typing import Any
 class ModelRunSpec:
     label: str
     model_id: str
-    backend: str = "localModel"
+    backend: str = "vllm"
     adapter_path: str | None = None
     base_url: str | None = None
 
@@ -56,60 +70,6 @@ def resolve_path(path: str | None, repo_root: Path) -> Path | None:
     return candidate.resolve()
 
 
-def parse_bool(value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "n", "off"}:
-        return False
-    raise argparse.ArgumentTypeError(f"Expected a boolean value, got {value!r}")
-
-
-def parse_run_spec(raw: str, default_backend: str = "localModel") -> ModelRunSpec:
-    """Parse one --run entry.
-
-    Supported formats:
-      --run '{"label": "qwen", "model_id": "Qwen/...", "adapter_path": "..."}'
-      --run label=qwen,backend=localModel,model=Qwen/...,adapter=src/...
-    """
-    raw = raw.strip()
-    if not raw:
-        raise argparse.ArgumentTypeError("--run cannot be empty")
-
-    if raw.startswith("{"):
-        payload = json.loads(raw)
-    else:
-        payload: dict[str, str] = {}
-        for part in raw.split(","):
-            if "=" not in part:
-                raise argparse.ArgumentTypeError(
-                    f"Invalid --run segment {part!r}. Use comma-separated key=value pairs."
-                )
-            key, value = part.split("=", 1)
-            payload[key.strip()] = value.strip()
-
-    label = payload.get("label") or payload.get("name")
-    model_id = payload.get("model_id") or payload.get("model")
-    backend = payload.get("backend", default_backend)
-    adapter_path = payload.get("adapter_path") or payload.get("adapter")
-    base_url = payload.get("base_url") or payload.get("vllm_base_url")
-
-    if not model_id:
-        raise argparse.ArgumentTypeError(f"--run is missing model/model_id: {raw}")
-    if not label:
-        label = slugify(model_id)
-        if none_if_blank(adapter_path):
-            label = f"{label}-adapter"
-
-    return ModelRunSpec(
-        label=slugify(label),
-        model_id=model_id,
-        backend=normalize_backend(backend),
-        adapter_path=none_if_blank(adapter_path),
-        base_url=none_if_blank(base_url),
-    )
-
-
 def normalize_backend(backend: str) -> str:
     aliases = {
         "local": "localModel",
@@ -123,77 +83,44 @@ def normalize_backend(backend: str) -> str:
     normalized = aliases.get(key, aliases.get(key.lower()))
     if normalized is None:
         raise argparse.ArgumentTypeError(
-            f"Unknown backend {backend!r}. Choose localModel, vllm, openai, or genai."
+            f"Unknown backend {backend!r}. Choose local, vllm, openai, or genai."
         )
     return normalized
 
 
-def load_run_specs_from_file(path: Path, default_backend: str) -> list[ModelRunSpec]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError("--runs-file must contain a JSON list")
-    return [parse_run_spec(json.dumps(item), default_backend=default_backend) for item in payload]
+def build_run_spec(args: argparse.Namespace) -> ModelRunSpec:
+    backend = normalize_backend(args.backend)
+    adapter_path = none_if_blank(args.lora)
+    base_url = none_if_blank(args.base_url)
 
+    if backend == "vllm" and base_url is None:
+        base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
 
-def infer_adapter_base_model(adapter_dir: Path) -> str | None:
-    config_path = adapter_dir / "adapter_config.json"
-    if not config_path.exists():
-        return None
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return payload.get("base_model_name_or_path")
-
-
-def discover_local_adapter_runs(outputs_dir: Path) -> list[ModelRunSpec]:
-    runs = []
-    if not outputs_dir.exists():
-        return runs
-
-    for adapter_dir in sorted(path for path in outputs_dir.iterdir() if path.is_dir()):
-        has_config = (adapter_dir / "adapter_config.json").exists()
-        has_weights = (adapter_dir / "adapter_model.safetensors").exists() or (adapter_dir / "adapter_model.bin").exists()
-        if not (has_config and has_weights):
-            continue
-        model_id = infer_adapter_base_model(adapter_dir)
-        if not model_id:
-            continue
-        runs.append(
-            ModelRunSpec(
-                label=slugify(adapter_dir.name),
-                model_id=model_id,
-                backend="localModel",
-                adapter_path=str(adapter_dir),
-            )
+    if adapter_path and backend != "localModel":
+        print(
+            f"Warning: --lora is only applied for the local backend; "
+            f"ignoring adapter for backend '{backend}'.",
+            file=sys.stderr,
         )
-    return runs
+        adapter_path = None
 
+    label = none_if_blank(args.label) or os.getenv("LATTICE_VLLM_LABEL")
+    if not label:
+        label = slugify(args.model)
+        label = f"{label}-lora" if adapter_path else f"{label}-base"
 
-def add_base_model_runs(runs: list[ModelRunSpec]) -> list[ModelRunSpec]:
-    expanded = list(runs)
-    seen = {(run.backend, run.model_id, none_if_blank(run.adapter_path), none_if_blank(run.base_url)) for run in expanded}
-
-    for run in runs:
-        if run.backend != "localModel" or not none_if_blank(run.adapter_path):
-            continue
-        key = (run.backend, run.model_id, None, none_if_blank(run.base_url))
-        if key in seen:
-            continue
-        expanded.append(
-            ModelRunSpec(
-                label=slugify(f"{run.label}-base"),
-                model_id=run.model_id,
-                backend=run.backend,
-                adapter_path=None,
-                base_url=run.base_url,
-            )
-        )
-        seen.add(key)
-    return expanded
+    return ModelRunSpec(
+        label=slugify(label),
+        model_id=args.model,
+        backend=backend,
+        adapter_path=adapter_path,
+        base_url=base_url,
+    )
 
 
 def load_eval_semantic_tree(eval_tree_path: Path):
+    import pickle
+
     from tree_objects import SemanticNode
 
     if eval_tree_path.suffix == ".pkl":
@@ -260,35 +187,20 @@ def make_llm_api_kwargs(args: argparse.Namespace, backend: str) -> dict[str, Any
     return kwargs
 
 
-def make_eval_api(
-    args: argparse.Namespace,
-    run: ModelRunSpec,
-    adapter_path: Path | None,
-    logger,
-):
+def make_eval_api(args: argparse.Namespace, run: ModelRunSpec, adapter_path: Path | None, logger):
     from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
 
     if run.backend == "genai":
-        return GenAIAPI(
-            run.model_id,
-            logger=logger,
-            timeout=args.timeout,
-            max_retries=args.max_retries,
-        )
+        return GenAIAPI(run.model_id, logger=logger, timeout=args.timeout, max_retries=args.max_retries)
     if run.backend == "openai":
-        return OpenAIResponsesAPI(
-            run.model_id,
-            logger=logger,
-            timeout=args.timeout,
-            max_retries=args.max_retries,
-        )
+        return OpenAIResponsesAPI(run.model_id, logger=logger, timeout=args.timeout, max_retries=args.max_retries)
     if run.backend == "vllm":
         return VllmAPI(
             run.model_id,
             logger=logger,
             timeout=args.timeout,
             max_retries=args.max_retries,
-            base_url=run.base_url or args.vllm_base_url or os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
+            base_url=run.base_url or os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
             load_balance=True,
         )
     if run.backend == "localModel":
@@ -320,12 +232,7 @@ def serializable_result(result: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in result.items() if key != "sample"}
 
 
-def save_results(
-    output_dir: Path,
-    run: ModelRunSpec,
-    df,
-    results: list[dict[str, Any]],
-) -> None:
+def save_results(output_dir: Path, run: ModelRunSpec, df, results: list[dict[str, Any]]) -> None:
     run_slug = slugify(run.label)
     df.to_json(output_dir / f"{run_slug}_ecthr_eval_rows.json", orient="records", indent=2)
     with (output_dir / f"{run_slug}_ecthr_eval_results.json").open("w", encoding="utf-8") as f:
@@ -349,7 +256,7 @@ def run_one_model(
 
     adapter_path = resolve_path(run.adapter_path, repo_root)
     if run.backend == "localModel" and adapter_path is not None and not adapter_path.exists():
-        raise FileNotFoundError(f"Adapter path for run {run.label!r} does not exist: {adapter_path}")
+        raise FileNotFoundError(f"Adapter path does not exist: {adapter_path}")
 
     log_path = output_dir / f"{slugify(run.label)}.log"
     logger = setup_logger(f"test_ecthr_models.{slugify(run.label)}", str(log_path))
@@ -392,7 +299,7 @@ def run_one_model(
         summary.insert(0, "model_id", run.model_id)
         summary.insert(0, "backend", run.backend)
         summary.insert(0, "run", run.label)
-        return summary, None
+        return summary
     finally:
         unload_eval_api(api)
         del evaluator
@@ -408,49 +315,27 @@ def run_one_model(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=(
-            "Run ECtHR LATTICE evaluation for multiple local, adapter, vLLM, OpenAI, "
-            "or Gemini model configurations and save one comparison table."
-        )
-    )
-    parser.add_argument(
-        "--run",
-        action="append",
-        default=[],
-        help=(
-            "Model run config. Repeat for multiple runs. Format: "
-            "label=name,backend=localModel,model=Qwen/...,adapter=src/... "
-            "or a JSON object with label/model_id/backend/adapter_path/base_url."
-        ),
-    )
-    parser.add_argument("--runs-file", default=None, help="JSON list of run configs.")
-    parser.add_argument("--default-backend", default="localModel", type=normalize_backend)
-    parser.add_argument(
-        "--auto-discover-adapters",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help=(
-            "When no --run is passed, evaluate adapter dirs under --adapter-outputs-dir. "
-            "Off by default: with no adapter specified, no adapter is used."
-        ),
-    )
-    parser.add_argument(
-        "--include-base-models",
-        action="store_true",
-        help="For local adapter runs, also add the same base model without the adapter.",
-    )
-    parser.add_argument(
-        "--adapter-outputs-dir",
-        default="src/llm_rl_playground/outputs",
-        help="Directory scanned by --auto-discover-adapters.",
+        description="Run the ECtHR LATTICE evaluation for a single model on a chosen backend."
     )
 
+    # --- Model / backend selection ---
+    parser.add_argument("--backend", default="vllm", help="local | vllm | openai | genai (default: vllm)")
+    parser.add_argument("--model", required=True, help="HF model id, or vLLM-served model/adapter name.")
+    parser.add_argument("--lora", "--adapter", dest="lora", default=None,
+                        help="LoRA/adapter dir. Only applied for the local backend.")
+    parser.add_argument("--base-url", default=None,
+                        help="vLLM endpoint(s), comma-separated. Defaults to $VLLM_BASE_URL or localhost:8000.")
+    parser.add_argument("--label", default=None,
+                        help="Run label / output prefix. Defaults to $LATTICE_VLLM_LABEL or a slug of --model.")
+
+    # --- Dataset / tree / output ---
     parser.add_argument("--tree-path", default="trees/EU/eu_conventions_notebook/eu_conventions_tree-bottom-up-llm.pkl")
     parser.add_argument("--ecthr-dataset", default="AUEB-NLP/ecthr_cases")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
     parser.add_argument("--eval-split", default="validation")
-    parser.add_argument("--output-dir", default="src/llm_rl_playground/outputs/ecthr-model-comparison")
+    parser.add_argument("--output-dir", default="src/llm_rl_playground/outputs/ecthr-eval")
 
+    # --- Eval controls ---
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--n-cases", type=int, default=5)
     parser.add_argument("--num-iters", type=int, default=6)
@@ -459,58 +344,32 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-predicted-articles", type=int, default=None)
     parser.add_argument("--use-llm-selector", action="store_true")
 
+    # --- API controls ---
     parser.add_argument("--max-concurrent-calls", type=int, default=None)
     parser.add_argument("--parse-max-concurrent-calls", type=int, default=None)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-retries", type=int, default=4)
     parser.add_argument("--staggering-delay", type=float, default=0.05)
     parser.add_argument("--max-tokens", type=int, default=384)
-    parser.add_argument("--vllm-base-url", default=None)
 
+    # --- Local backend controls ---
     parser.add_argument("--local-use-4bit", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--local-serialize-requests", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--enable-thinking", action="store_true")
     parser.add_argument("--log-api-calls", action="store_true")
 
+    # --- Traversal controls ---
     parser.add_argument("--max-beam-size", type=int, default=8)
     parser.add_argument("--relevance-chain-factor", type=float, default=0.5)
     parser.add_argument("--reasoning-in-traversal-prompt", type=int, default=-1)
     parser.add_argument("--max-prompt-proto-size", type=int, default=None)
     parser.add_argument("--max-doc-desc-char-len", type=int, default=None)
 
+    # --- Logging ---
     parser.add_argument("--detailed-logs", action="store_true")
     parser.add_argument("--quiet-cases", action="store_true")
     parser.add_argument("--show-error-logs", action="store_true")
-    parser.add_argument("--fail-fast", action="store_true")
     return parser
-
-
-def collect_run_specs(args: argparse.Namespace, repo_root: Path) -> list[ModelRunSpec]:
-    runs = [parse_run_spec(raw, default_backend=args.default_backend) for raw in args.run]
-
-    if args.runs_file:
-        runs.extend(
-            load_run_specs_from_file(
-                resolve_path(args.runs_file, repo_root) or Path(args.runs_file),
-                default_backend=args.default_backend,
-            )
-        )
-
-    if not runs and args.auto_discover_adapters:
-        adapter_outputs_dir = resolve_path(args.adapter_outputs_dir, repo_root)
-        assert adapter_outputs_dir is not None
-        runs.extend(discover_local_adapter_runs(adapter_outputs_dir))
-
-    if args.include_base_models:
-        runs = add_base_model_runs(runs)
-
-    if not runs:
-        raise SystemExit(
-            "No model runs configured. Pass one or more --run entries, a --runs-file, "
-            "or keep --auto-discover-adapters enabled with adapters in --adapter-outputs-dir."
-        )
-
-    return runs
 
 
 def main() -> None:
@@ -519,8 +378,6 @@ def main() -> None:
 
     repo_root = repo_root_from_script()
     ensure_src_on_path(repo_root)
-
-    import pandas as pd
 
     from llm_rl_playground.ecthr_evaluation import get_label_names, load_ecthr_dataset
     from utils import compute_node_registry
@@ -533,13 +390,13 @@ def main() -> None:
     if tree_path is None or not tree_path.exists():
         raise FileNotFoundError(f"Evaluation tree does not exist: {tree_path}")
 
-    runs = collect_run_specs(args, repo_root)
+    run = build_run_spec(args)
     print(
         json.dumps(
             {
                 "tree_path": str(tree_path),
                 "output_dir": str(output_dir),
-                "runs": [asdict(run) for run in runs],
+                "run": asdict(run),
                 "eval_split": args.eval_split,
                 "start": args.start,
                 "n_cases": args.n_cases,
@@ -556,60 +413,32 @@ def main() -> None:
     eval_dataset = load_ecthr_dataset(split=args.eval_split, config=args.ecthr_config)
     label_names = get_label_names(eval_dataset)
 
-    summaries = []
-    failures = []
-    for run_index, run in enumerate(runs, start=1):
-        print(f"\n================ Run {run_index}/{len(runs)}: {run.label} ================")
-        print(json.dumps(asdict(run), ensure_ascii=False, indent=2))
-        try:
-            summary, failure = run_one_model(
-                args,
-                run,
-                repo_root=repo_root,
-                tree_path=tree_path,
-                semantic_root_node=semantic_root_node,
-                node_registry=node_registry,
-                eval_dataset=eval_dataset,
-                label_names=label_names,
-                output_dir=output_dir,
-            )
-            if summary is not None:
-                summaries.append(summary)
-            if failure is not None:
-                failures.append(failure)
-        except Exception as exc:
-            failure = {
-                "run": run.label,
-                "backend": run.backend,
-                "model_id": run.model_id,
-                "adapter_path": run.adapter_path or "",
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            }
-            failures.append(failure)
-            print(f"Run failed: {run.label}: {exc}")
-            if args.show_error_logs:
-                print(failure["traceback"])
-            if args.fail_fast:
-                raise
+    try:
+        summary = run_one_model(
+            args,
+            run,
+            repo_root=repo_root,
+            tree_path=tree_path,
+            semantic_root_node=semantic_root_node,
+            node_registry=node_registry,
+            eval_dataset=eval_dataset,
+            label_names=label_names,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        print(f"Run failed: {run.label}: {exc}", file=sys.stderr)
+        if args.show_error_logs:
+            print(traceback.format_exc(), file=sys.stderr)
+        raise SystemExit(1)
 
-    if summaries:
-        comparison_df = pd.concat(summaries, ignore_index=True)
-        comparison_csv = output_dir / "ecthr_model_comparison.csv"
-        comparison_json = output_dir / "ecthr_model_comparison.json"
-        comparison_df.to_csv(comparison_csv, index=False)
-        comparison_df.to_json(comparison_json, orient="records", indent=2)
-        print("\n================ ECtHR Model Comparison ================")
-        print(comparison_df.to_string(index=False))
-        print(f"Saved comparison CSV to: {comparison_csv}")
-        print(f"Saved comparison JSON to: {comparison_json}")
-
-    if failures:
-        failures_path = output_dir / "ecthr_model_comparison_failures.json"
-        failures_path.write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"Saved failures to: {failures_path}")
-        if not summaries:
-            raise SystemExit(1)
+    summary_csv = output_dir / f"{slugify(run.label)}_ecthr_summary.csv"
+    summary_json = output_dir / f"{slugify(run.label)}_ecthr_summary.json"
+    summary.to_csv(summary_csv, index=False)
+    summary.to_json(summary_json, orient="records", indent=2)
+    print("\n================ ECtHR Eval Summary ================")
+    print(summary.to_string(index=False))
+    print(f"Saved summary CSV to:  {summary_csv}")
+    print(f"Saved summary JSON to: {summary_json}")
 
 
 if __name__ == "__main__":
