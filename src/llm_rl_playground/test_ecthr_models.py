@@ -2,17 +2,50 @@ from __future__ import annotations
 
 """Run the ECtHR LATTICE evaluation for a SINGLE model on a chosen backend.
 
-Examples:
-  # vLLM-served base model (uses VLLM_BASE_URL env or --base-url)
-  python test_ecthr_models.py --backend vllm --model Qwen/Qwen3.6-27B-FP8 \
-      --base-url http://localhost:8000/v1 --n-cases 100 --num-iters 10
+Pick the LLM type with --backend (local | vllm | openai | genai), the model with
+--model, and tune the run with the eval/api/traversal flags (see --help).
 
-  # Local HuggingFace model with a LoRA adapter
-  python test_ecthr_models.py --backend local --model Qwen/Qwen2.5-1.5B-Instruct \
-      --lora src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora
+------------------------------------------------------------------------------
+Setup: start a vLLM cluster and load the env vars it writes
+------------------------------------------------------------------------------
+The start script writes logs/vllm_load_balanced_env.sh exporting:
+    VLLM_BASE_URL        all server URLs (comma-separated)
+    LATTICE_VLLM_MODEL   the served model id
+    LATTICE_VLLM_LABEL   a label for the run / output files
 
-  # OpenAI / Gemini
-  python test_ecthr_models.py --backend openai --model gpt-4.1
+    ./scripts/start_vllm_cluster.sh --model "Qwen/Qwen3.6-27B-FP8" --vllm-mode data
+    source logs/vllm_load_balanced_env.sh
+
+--base-url falls back to $VLLM_BASE_URL and --label to $LATTICE_VLLM_LABEL, so
+once the env file is sourced you only need --backend and --model.
+
+------------------------------------------------------------------------------
+Examples (all assume `source logs/vllm_load_balanced_env.sh` was run first)
+------------------------------------------------------------------------------
+  # vLLM base model — base_url + label come from the env vars
+  python src/llm_rl_playground/test_ecthr_models.py \
+      --backend vllm --model "$LATTICE_VLLM_MODEL" --base-url "$VLLM_BASE_URL" \
+      --n-cases 100 --num-iters 10
+
+  # vLLM, minimal — base_url ($VLLM_BASE_URL) and label ($LATTICE_VLLM_LABEL)
+  # are picked up automatically when omitted
+  python src/llm_rl_playground/test_ecthr_models.py \
+      --backend vllm --model "$LATTICE_VLLM_MODEL"
+
+  # vLLM with an explicit run label (overrides $LATTICE_VLLM_LABEL)
+  python src/llm_rl_playground/test_ecthr_models.py \
+      --backend vllm --model "$LATTICE_VLLM_MODEL" --base-url "$VLLM_BASE_URL" \
+      --label "${LATTICE_VLLM_LABEL}-run2"
+
+  # Local HuggingFace model with a LoRA adapter (no server needed)
+  python src/llm_rl_playground/test_ecthr_models.py \
+      --backend local --model "$LATTICE_VLLM_MODEL" \
+      --lora src/llm_rl_playground/outputs/qwen2.5-1.5b-ecthr-tree-traversal-lora \
+      --label "$LATTICE_VLLM_LABEL"
+
+  # OpenAI / Gemini (set OPENAI_API_KEY / GOOGLE_API_KEY first)
+  python src/llm_rl_playground/test_ecthr_models.py \
+      --backend openai --model gpt-4.1 --label "$LATTICE_VLLM_LABEL"
 """
 
 import argparse
