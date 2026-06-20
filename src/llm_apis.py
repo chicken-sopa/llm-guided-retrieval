@@ -1523,6 +1523,7 @@ class VllmAPI(LanguageModelAPI):
         max_retries: int = 3,
         logger: Optional[logging.Logger] = None,
         load_balance: bool = False,
+        enable_thinking: Optional[bool] = None,
         **kwargs: Any,
     ):
         """
@@ -1538,6 +1539,9 @@ class VllmAPI(LanguageModelAPI):
             max_retries (int): Maximum retry attempts
             logger (Optional[logging.Logger]): Logger instance
             load_balance (bool): Enable round-robin load balancing across multiple servers
+            enable_thinking (Optional[bool]): If not None, applied to every call as a
+                                     chat-template kwarg (e.g. False disables Qwen3
+                                     thinking mode). None leaves the model default.
             **kwargs: Additional config parameters (temperature, max_tokens, top_p, etc.)
         """
         # Get base URL from environment if available
@@ -1569,6 +1573,9 @@ class VllmAPI(LanguageModelAPI):
 
         # Store default config parameters
         self.default_config = {}
+        if enable_thinking is not None:
+            self.default_config['enable_thinking'] = enable_thinking
+            self.logger.info(f"vLLM enable_thinking set to {enable_thinking} for all calls")
 
     def _format_prompt(self, prompt: Any) -> List[Dict[str, str]]:
         """
@@ -1641,14 +1648,22 @@ class VllmAPI(LanguageModelAPI):
         # Handle response_schema for constrained decoding
         response_schema = config_params.pop('response_schema', None)
         guided_decoding_backend = config_params.pop('guided_decoding_backend', None)
+        enable_thinking = config_params.pop('enable_thinking', None)
+
+        # Single extra_body shared by guided decoding and chat-template kwargs so
+        # neither overwrites the other.
+        extra_body = config_params.get('extra_body', {})
+
+        # Pass enable_thinking to the model's chat template (e.g. Qwen3 thinking mode).
+        if enable_thinking is not None:
+            chat_template_kwargs = dict(extra_body.get('chat_template_kwargs', {}))
+            chat_template_kwargs['enable_thinking'] = enable_thinking
+            extra_body['chat_template_kwargs'] = chat_template_kwargs
 
         if response_schema:
             # Convert to vLLM's guided_json format
             # vLLM expects the schema as a JSON object
             import json
-
-            # Prepare extra_body for guided generation
-            extra_body = config_params.get('extra_body', {})
 
             if isinstance(response_schema, dict):
                 extra_body['guided_json'] = response_schema
@@ -1660,8 +1675,10 @@ class VllmAPI(LanguageModelAPI):
             if guided_decoding_backend:
                 extra_body['guided_decoding_backend'] = guided_decoding_backend
 
-            config_params['extra_body'] = extra_body
             self.logger.debug(f"Using guided JSON generation with schema")
+
+        if extra_body:
+            config_params['extra_body'] = extra_body
 
         try:
             # Get client (handles load balancing if enabled)

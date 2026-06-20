@@ -64,8 +64,8 @@ doc_id_to_path = {get_node_id(leaf.id, docs_df): path for leaf, path in all_leaf
 #region Setup LLM API and Eval Samples
 if hp.LLM_API_BACKEND == 'genai': 
     llm_api = GenAIAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES)
-elif hp.LLM_API_BACKEND == 'vllm': 
-    llm_api = VllmAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES, base_url=','.join([f"http://localhost:{8000+i}/v1" for i in range(4)]))
+elif hp.LLM_API_BACKEND == 'vllm':
+    llm_api = VllmAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES, base_url=','.join([f"http://localhost:{8000+i}/v1" for i in range(4)]), enable_thinking=False)
 elif hp.LLM_API_BACKEND == 'openai':
     llm_api = OpenAIResponsesAPI(hp.LLM, logger=logger, timeout=hp.LLM_API_TIMEOUT, max_retries=hp.LLM_API_MAX_RETRIES)
 elif hp.LLM_API_BACKEND in {'local', 'localModel'}:

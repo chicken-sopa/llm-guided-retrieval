@@ -235,6 +235,7 @@ def make_eval_api(args: argparse.Namespace, run: ModelRunSpec, adapter_path: Pat
             max_retries=args.max_retries,
             base_url=run.base_url or os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
             load_balance=True,
+            enable_thinking=args.enable_thinking,
         )
     if run.backend == "localModel":
         return LocalModelAPI(
