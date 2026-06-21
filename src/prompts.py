@@ -26,7 +26,7 @@ Valid candidate IDs for this request: {valid_candidate_ids}. Do not output any c
 
 ## YOUR EVALUATION TASK
 1.  First, identify the essential problem in the query.
-2.  Briefly explain why each candidate is relevant or irrelevant (based on the relevance definition). Put this explanation only in the `reasoning` string.
+2.  In one or two short sentences TOTAL (not per candidate, ~40 words max), explain the key relevance signal. Put this brief explanation only in the `reasoning` string. Do not write a long analysis — keep it concise so the JSON stays short.
 3.  Rank these passages based on their relevance to the query. Provide your ranking in the `ranking` field.
 4.  Assign a relevance score from 0 to 100 (based on the relevance definition and the ranking). Provide relevances in the `relevance_scores` field.
 
@@ -37,7 +37,7 @@ You must provide your response as a single, clean JSON object. The JSON should h
 Do not add any other keys. Do not replace these keys with topic names, labels, or prose.
 Your entire response must start with `{{` and end with `}}`. Do not write analysis before or after the JSON.
 
-* `reasoning`: This must be a **string**.
+* `reasoning`: This must be a short **string** (one or two sentences, ~40 words max).
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
 * `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 0]] for an irrelevant candidate or [[0, 85]] for a relevant candidate.
 
@@ -74,7 +74,7 @@ Valid candidate IDs for this request: {valid_candidate_ids}. Do not output any c
 
 ## YOUR EVALUATION TASK
 1.  First, identify the essential problem in the query.
-2.  Briefly explain why each passage is relevant or irrelevant (based on the relevance definition). Put this explanation only in the `reasoning` string.
+2.  In one or two short sentences TOTAL (not per passage, ~40 words max), explain the key relevance signal. Put this brief explanation only in the `reasoning` string. Do not write a long analysis — keep it concise so the JSON stays short.
 3.  Rank these passages based on their relevance to the query. Provide your ranking in the `ranking` field.
 4.  Assign a relevance score from 0 to 100. The score must reflect how well the passage, *on its own*, substantively answers the query.
     * **High scores** should be reserved for passages that contain a direct answer or a critical piece of the answer.
@@ -87,7 +87,7 @@ You must provide your response as a single, clean JSON object. The JSON should h
 Do not add any other keys. Do not replace these keys with topic names, labels, or prose.
 Your entire response must start with `{{` and end with `}}`. Do not write analysis before or after the JSON.
 
-* `reasoning`: This must be a **string**.
+* `reasoning`: This must be a short **string** (one or two sentences, ~40 words max).
 * `ranking`: This must be an **array of integers** representing the order of the candidates.
 * `relevance_scores`: This must be an **array of arrays** where each inner array contains [node_id, relevance_score]. Use only valid candidate IDs from this request. For example, if the only valid candidate ID is 0, output [[0, 0]] for an irrelevant candidate or [[0, 85]] for a relevant candidate.
 
