@@ -1,0 +1,13 @@
+# Secrets / local env
+.env
+
+# Source PDF and generated corpus
+data/*.pdf
+data/*.jsonl
+
+# Eval outputs
+outputs/
+
+# Python
+__pycache__/
+*.pyc

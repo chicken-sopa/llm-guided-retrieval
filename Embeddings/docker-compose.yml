@@ -1,0 +1,54 @@
+# Two services for the embedding-search baseline:
+#   db          - Postgres + pgvector (relational + vector store in one)
+#   vllm-embed  - vLLM serving the embedding model (--task embed)
+# The Python scripts (parse / build_index / eval) run on the HOST so they can
+# import src/llm_rl_playground/ecthr_evaluation for scoring.
+#
+#   docker compose up -d db vllm-embed
+#
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-echr}
+      POSTGRES_USER: ${POSTGRES_USER:-echr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-echr}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-echr} -d ${POSTGRES_DB:-echr}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  vllm-embed:
+    image: vllm/vllm-openai:latest
+    # vLLM serves ONE model per server; switch EMBED_MODEL to change it.
+    command: ["--model", "${EMBED_MODEL:-Qwen/Qwen3-Embedding-8B}", "--task", "embed", "--port", "8100"]
+    ports:
+      - "${EMBED_PORT:-8100}:8100"
+    # Shared memory: avoids the vLLM IPC/shm hangs seen with the default 64MB.
+    ipc: host
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8100/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:
+  hf_cache:
