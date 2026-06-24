@@ -30,7 +30,7 @@ def main() -> None:
     here = Path(__file__).resolve()
     parser = argparse.ArgumentParser(description="Embed parsed Convention articles into pgvector.")
     parser.add_argument("--model", default=None, help="Model slug from config.MODELS (default: ACTIVE_MODEL).")
-    parser.add_argument("--jsonl", default=str(here.parent / "data" / "convention_articles.jsonl"))
+    parser.add_argument("--jsonl", default=str(here.parent / "parsing" / "echr" / "convention_articles.jsonl"))
     args = parser.parse_args()
 
     cfg = config.get_model(args.model)

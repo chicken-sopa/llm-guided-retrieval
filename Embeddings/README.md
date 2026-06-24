@@ -10,8 +10,11 @@ Embeddings/
 ├── .env.example                # copy to .env
 ├── requirements.txt            # host-side python deps
 ├── sql/init.sql                # CREATE EXTENSION vector
-├── data/                       # put Convention_ENG.pdf here; parser writes the jsonl
-├── parsing/parse_convention.py # PDF -> one chunk per article
+├── parsing/
+│   ├── parse_convention.py     # PDF -> one chunk per article
+│   └── echr/                   # source PDF + parsed chunks live here
+│       ├── Convention_ENG.pdf          (download)
+│       └── convention_articles.jsonl   (generated)
 ├── config.py                   # model registry + DB DSN (single model now)
 ├── embed.py                    # vLLM /v1/embeddings client
 ├── db.py                       # pgvector connect / upsert / exact top-k search
@@ -38,8 +41,8 @@ Embeddings/
 ```bash
 cp .env.example .env                       # adjust if needed
 pip install -r requirements.txt            # host deps
-# download the source PDF into data/
-curl -L https://www.echr.coe.int/Documents/Convention_ENG.pdf -o data/Convention_ENG.pdf
+# download the source PDF into the echr folder
+curl -L https://www.echr.coe.int/Documents/Convention_ENG.pdf -o parsing/echr/Convention_ENG.pdf
 ```
 
 ## Run order
@@ -50,7 +53,7 @@ docker compose up -d db vllm-embed
 
 # 2. parse the Convention PDF into per-article chunks
 python parsing/parse_convention.py
-#    -> data/convention_articles.jsonl
+#    -> parsing/echr/convention_articles.jsonl
 
 # 3. embed the articles into pgvector
 PYTHONPATH=../src python build_index.py

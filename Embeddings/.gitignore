@@ -1,9 +1,9 @@
 # Secrets / local env
 .env
 
-# Source PDF and generated corpus
-data/*.pdf
-data/*.jsonl
+# Source PDF and generated corpus (per-dataset folders under parsing/)
+parsing/*/*.pdf
+parsing/*/*.jsonl
 
 # Eval outputs
 outputs/

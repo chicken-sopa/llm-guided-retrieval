@@ -2,6 +2,10 @@
 
 Source: https://www.echr.coe.int/Documents/Convention_ENG.pdf
 
+Input/output both live in parsing/echr/:
+    parsing/echr/Convention_ENG.pdf          (source — download here)
+    parsing/echr/convention_articles.jsonl   (parsed chunks — written here)
+
 Output: convention_articles.jsonl, one record per article:
     {"article_id": "article_6", "label": "Article 6", "part": "convention",
      "title": "Right to a fair trial", "content": "..."}
@@ -114,8 +118,9 @@ def parse(pdf_path: Path) -> list[dict]:
 
 def main() -> None:
     here = Path(__file__).resolve()
-    default_pdf = here.parents[1] / "data" / "Convention_ENG.pdf"
-    default_out = here.parents[1] / "data" / "convention_articles.jsonl"
+    echr_dir = here.parent / "echr"
+    default_pdf = echr_dir / "Convention_ENG.pdf"
+    default_out = echr_dir / "convention_articles.jsonl"
 
     parser = argparse.ArgumentParser(description="Parse the ECHR Convention PDF into per-article chunks.")
     parser.add_argument("--pdf", default=str(default_pdf))
@@ -125,8 +130,8 @@ def main() -> None:
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
         raise SystemExit(
-            f"PDF not found: {pdf_path}\nDownload it from "
-            "https://www.echr.coe.int/Documents/Convention_ENG.pdf"
+            f"PDF not found: {pdf_path}\nDownload it into the echr folder:\n"
+            f"  curl -L https://www.echr.coe.int/Documents/Convention_ENG.pdf -o {pdf_path}"
         )
 
     records = parse(pdf_path)
