@@ -4,6 +4,8 @@
 # Source PDF and generated corpus (per-dataset folders under parsing/)
 parsing/*/*.pdf
 parsing/*/*.jsonl
+# chunks json holds cached embeddings (large, model-specific, regenerable)
+parsing/*/convention_chunks.json
 
 # Eval outputs
 outputs/

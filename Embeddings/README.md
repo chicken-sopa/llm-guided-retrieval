@@ -51,12 +51,14 @@ curl -L https://www.echr.coe.int/Documents/Convention_ENG.pdf -o parsing/echr/Co
 # 1. start the stores (Postgres + embedding server)
 docker compose up -d db vllm-embed
 
-# 2. parse the Convention PDF into per-article chunks
-python parsing/parse_convention.py
-#    -> parsing/echr/convention_articles.jsonl
+# 2. (corpus) parsing/echr/convention_chunks.json — chunks with
+#    protocol/article_number/title/text (one chunk per article)
 
-# 3. embed the articles into pgvector
+# 3. embed the chunks into pgvector; embeddings are CACHED back into the
+#    chunks json under the "embeddings" key (reused on rerun)
 PYTHONPATH=../src python build_index.py
+#    add --overwrite to recompute cached embeddings
+#    add --no-db to only compute/cache embeddings without upserting
 
 # 4. run the top-k retrieval baseline on ECtHR (reuses LATTICE scoring)
 PYTHONPATH=../src python eval_embedding_search.py --label embed-topk-qwen3 \
