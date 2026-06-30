@@ -4,15 +4,15 @@ Baseline for the LATTICE comparison. For each case: embed the facts, do an exact
 cosine top-k over the Convention articles, treat the retrieved article ids as the
 predicted alleged-violation articles, and score against the gold labels.
 
-Scoring REUSES src/llm_rl_playground/ecthr_evaluation.py (same gold extraction
-and metrics as the LATTICE eval) so the comparison is apples-to-apples. Output
-schema matches the LATTICE per-run summary.
+Scoring REUSES ecthr_evaluation.py (same gold extraction and metrics as the
+LATTICE eval) so the comparison is apples-to-apples. Output schema matches the
+LATTICE per-run summary. The embedding ops live in the Embeddings/ folder
+(config, embed, db); this script imports them.
 
 Run order:
-    docker compose up -d db vllm-embed
-    python parsing/parse_convention.py
-    python build_index.py
-    PYTHONPATH=src python eval_embedding_search.py --label embed-topk-qwen3
+    docker compose up -d db vllm-embed        # from repo root
+    python Embeddings/build_index.py          # embed corpus -> pgvector
+    python src/llm_rl_playground/eval_embedding_search.py --label embed-topk-qwen3
 """
 from __future__ import annotations
 
@@ -24,8 +24,9 @@ from pathlib import Path
 
 def _add_paths() -> None:
     here = Path(__file__).resolve()
-    sys.path.insert(0, str(here.parent))              # Embeddings/
-    sys.path.insert(0, str(here.parents[1] / "src"))  # repo src/ (ecthr_evaluation)
+    repo_root = here.parents[2]
+    sys.path.insert(0, str(repo_root / "src"))         # ecthr_evaluation
+    sys.path.insert(0, str(repo_root / "Embeddings"))  # config, embed, db
 
 
 def build_query(example: dict, max_chars: int = 8000) -> str:
@@ -61,7 +62,7 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
-    parser.add_argument("--output-dir", default=str(here.parent / "outputs"))
+    parser.add_argument("--output-dir", default=str(here.parent / "outputs" / "ecthr-embed-eval"))
     parser.add_argument("--label", default=None)
     args = parser.parse_args()
 

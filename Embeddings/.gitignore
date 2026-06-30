@@ -1,14 +1,9 @@
-# Secrets / local env
+# Local env
 .env
 
-# Source PDF and generated corpus (per-dataset folders under parsing/)
-parsing/*/*.pdf
-parsing/*/*.jsonl
-# chunks json holds cached embeddings (large, model-specific, regenerable)
-parsing/*/convention_chunks.json
-
-# Eval outputs
-outputs/
+# Corpus chunks hold cached embeddings (large, model-specific, regenerable)
+echr/*.json
+echr/*.pdf
 
 # Python
 __pycache__/

@@ -90,7 +90,7 @@ def main() -> None:
     here = Path(__file__).resolve()
     parser = argparse.ArgumentParser(description="Embed convention_chunks.json into pgvector (cached in the json).")
     parser.add_argument("--model", default=None, help="Model slug from config.MODELS (default: ACTIVE_MODEL).")
-    parser.add_argument("--chunks", default=str(here.parent / "parsing" / "echr" / "convention_chunks.json"))
+    parser.add_argument("--chunks", default=str(here.parent / "echr" / "convention_chunks.json"))
     parser.add_argument("--overwrite", action="store_true", help="Recompute embeddings even if already cached.")
     parser.add_argument("--no-db", action="store_true", help="Only compute/cache embeddings; skip the pgvector upsert.")
     args = parser.parse_args()
