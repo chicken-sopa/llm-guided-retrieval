@@ -436,7 +436,7 @@ Explicit vLLM served runs:
 
 PYTHONPATH=src python src/llm_rl_playground/test_ecthr_models.py \
   --run label=qwen25_served_adapter,backend=vllm,model="$LATTICE_VLLM_MODEL",base_url="$VLLM_BASE_URL" \
-  --run label=qwen25_served_base,backend=vllm,model=Qwen/Qwen2.5-1.5B-Instruct,base_url="$VLLM_BASE_URL" \
+  --run label=qwen25_served_base,   backend=vllm,model=Qwen/Qwen2.5-1.5B-Instruct,base_url="$VLLM_BASE_URL" \
   --n-cases 1000 \
   --num-iters 10 \
   --max-concurrent-calls 24 \
