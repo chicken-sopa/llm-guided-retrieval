@@ -1,5 +1,9 @@
 """Embedding client: calls the vLLM OpenAI-compatible /v1/embeddings endpoint.
 
+HOW TO USE: imported by build_index.py (documents) and eval_embedding_search.py
+(queries) — not run directly. Needs a vLLM embedding server running at
+config.EMBED_BASE_URL. Call embed_texts(texts, is_query=..., cfg, base_url).
+
 Applies the per-model query/document prefix (critical for retrieval quality —
 e.g. Qwen3-Embedding wants an instruction prefix on queries but raw documents).
 """

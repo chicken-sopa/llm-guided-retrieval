@@ -1,5 +1,9 @@
 """In-memory vector index over the cached chunk embeddings.
 
+HOW TO USE: imported by eval_embedding_search.py — not run directly.
+    index = VectorIndex.from_chunks_json(chunks_path, model_name, normalize_article_label)
+    hits = index.search(query_vec, k=10)   # -> list of {article_id, similarity, ...}
+
 The corpus is ~116 articles, so there's no need for a database: build_index.py
 caches each article's embedding into convention_chunks.json, and this module
 loads those vectors into a NumPy matrix and does exact cosine top-k in memory.

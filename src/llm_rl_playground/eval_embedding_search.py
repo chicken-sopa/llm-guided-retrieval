@@ -1,5 +1,10 @@
 """Evaluate plain top-k embedding retrieval on ECtHR cases.
 
+HOW TO USE (embed server must be up + build_index.py must have run first):
+    python src/llm_rl_playground/eval_embedding_search.py --label embed-topk \
+        --n-cases 100 --top-k 10
+Output: src/llm_rl_playground/outputs/ecthr-embed-eval/<label>_ecthr_summary.csv
+
 Baseline for the LATTICE comparison. For each case: embed the facts, do an exact
 cosine top-k over the Convention articles, treat the retrieved article ids as the
 predicted alleged-violation articles, and score against the gold labels.

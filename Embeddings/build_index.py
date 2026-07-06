@@ -1,5 +1,10 @@
 """Build the index: embed convention_chunks.json and cache the vectors in it.
 
+HOW TO USE (needs a vLLM embedding server running — see serve_and_index.sh):
+    python Embeddings/build_index.py               # embed missing chunks + cache
+    python Embeddings/build_index.py --overwrite   # recompute all embeddings
+Then evaluate with src/llm_rl_playground/eval_embedding_search.py.
+
 Source: echr/convention_chunks.json — a list of chunks, each with
 `protocol`, `article_number`, `title`, `text`.
 

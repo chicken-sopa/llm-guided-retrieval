@@ -1,8 +1,11 @@
 """Central configuration for the embedding-search baseline.
 
+HOW TO USE: imported by build_index.py and eval_embedding_search.py — not run
+directly. Edit MODELS / ACTIVE_MODEL here (or set the EMBED_MODEL / EMBED_BASE_URL
+/ TOP_K env vars) to change which embedding model and endpoint are used.
+
 Single model now, registry-ready: `MODELS` is keyed by slug so adding more
 models later (multi-model sweep) is just adding entries — no other code changes.
-Each model gets its own pgvector table (dims differ per model).
 """
 from __future__ import annotations
 
