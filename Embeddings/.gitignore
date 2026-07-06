@@ -5,6 +5,10 @@
 echr/*.json
 echr/*.pdf
 
+# vLLM embed server logs/pid
+vllm_embed.log
+vllm_embed.pid
+
 # Python
 __pycache__/
 *.pyc

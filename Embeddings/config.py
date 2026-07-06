@@ -40,10 +40,8 @@ def _env(key: str, default: str | None = None) -> str | None:
 class ModelCfg:
     slug: str
     hf_name: str
-    table: str
     query_prefix: str = ""
     doc_prefix: str = ""
-    dim: int | None = None  # None => probe the server at build time
 
 
 # ---- Model registry (one entry now; add more for a multi-model sweep) ----
@@ -51,14 +49,12 @@ MODELS: dict[str, ModelCfg] = {
     "qwen3-emb-8b": ModelCfg(
         slug="qwen3-emb-8b",
         hf_name=_env("EMBED_MODEL", "Qwen/Qwen3-Embedding-8B"),
-        table="documents_qwen3_emb_8b",
         # Qwen3-Embedding convention: instruction prefix on queries, raw docs.
         query_prefix=(
             "Instruct: Given the facts of a legal case, retrieve the European "
             "Convention on Human Rights articles most relevant to it.\nQuery: "
         ),
         doc_prefix="",
-        dim=None,
     ),
 }
 
@@ -77,12 +73,3 @@ def get_model(slug: str | None = None) -> ModelCfg:
     if slug not in MODELS:
         raise KeyError(f"Unknown model '{slug}'. Known: {list(MODELS)}")
     return MODELS[slug]
-
-
-def dsn() -> str:
-    host = _env("POSTGRES_HOST", "localhost")
-    port = _env("POSTGRES_PORT", "5432")
-    db = _env("POSTGRES_DB", "echr")
-    user = _env("POSTGRES_USER", "echr")
-    password = _env("POSTGRES_PASSWORD", "echr")
-    return f"host={host} port={port} dbname={db} user={user} password={password}"

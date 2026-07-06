@@ -42,12 +42,13 @@ def main() -> None:
     import pandas as pd
 
     import config
-    import db
     import embed
+    from store import VectorIndex
     from llm_rl_playground.ecthr_evaluation import (
         example_gold_articles,
         get_label_names,
         load_ecthr_dataset,
+        normalize_article_label,
         score_prediction,
         summarize_ecthr_cases,
     )
@@ -63,6 +64,7 @@ def main() -> None:
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
     parser.add_argument("--output-dir", default=str(here.parent / "outputs" / "ecthr-embed-eval"))
+    parser.add_argument("--chunks", default=None, help="Path to the embedded chunks json (default: Embeddings/echr/convention_chunks.json).")
     parser.add_argument("--label", default=None)
     args = parser.parse_args()
 
@@ -71,12 +73,12 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    chunks_path = args.chunks or (here.parents[2] / "Embeddings" / "echr" / "convention_chunks.json")
+    index = VectorIndex.from_chunks_json(chunks_path, cfg.hf_name, normalize_article_label)
+    print(f"Loaded in-memory index: {index.size} articles embedded with {cfg.hf_name}.")
+
     dataset = load_ecthr_dataset(split=args.eval_split, config=args.ecthr_config)
     label_names = get_label_names(dataset)
-
-    conn = db.connect(config.dsn())
-    if db.count_rows(conn, cfg.table) == 0:
-        raise SystemExit(f"Table {cfg.table} is empty — run build_index.py first.")
 
     n = min(args.n_cases, len(dataset) - args.start)
     rows = []
@@ -87,7 +89,7 @@ def main() -> None:
         query_text = build_query(example)
         query_vec = embed.embed_texts([query_text], is_query=True, cfg=cfg, base_url=config.EMBED_BASE_URL)[0]
 
-        hits = db.search(conn, cfg.table, query_vec, args.top_k)
+        hits = index.search(query_vec, args.top_k)
         if args.min_score is not None:
             hits = [hit for hit in hits if hit["similarity"] >= args.min_score]
         predicted = {hit["article_id"] for hit in hits}
@@ -103,7 +105,6 @@ def main() -> None:
             }
         )
     elapsed = time.time() - start_time
-    conn.close()
 
     df = pd.DataFrame(rows)
     df.to_json(output_dir / f"{label}_ecthr_eval_rows.json", orient="records", indent=2)
