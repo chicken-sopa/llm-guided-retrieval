@@ -24,9 +24,11 @@ if curl -s "http://localhost:${PORT}/health" >/dev/null 2>&1; then
     echo "Embedding server already running on port ${PORT}."
 else
     echo "Starting vLLM embedding server: ${MODEL} on port ${PORT} ..."
+    # --runner pooling replaces the deprecated --task embed (vLLM >= ~0.11);
+    # for an embedding model vLLM also auto-detects this via --runner auto.
     nohup python -m vllm.entrypoints.openai.api_server \
         --model "$MODEL" \
-        --task embed \
+        --runner pooling \
         --port "$PORT" \
         --host 0.0.0.0 \
         > "$LOG" 2>&1 &

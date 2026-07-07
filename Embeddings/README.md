@@ -40,7 +40,7 @@ kill $(cat Embeddings/vllm_embed.pid)
 
 Or start the server yourself and run the steps manually:
 ```bash
-python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-Embedding-8B --task embed --port 8100 &
+python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-Embedding-8B --runner pooling --port 8100 &
 python Embeddings/build_index.py
 python src/llm_rl_playground/eval_embedding_search.py --label embed-topk
 ```
