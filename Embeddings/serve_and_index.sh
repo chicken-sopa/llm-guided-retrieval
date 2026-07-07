@@ -36,7 +36,7 @@ else
     echo "PID $(cat "$HERE/vllm_embed.pid"), log: $LOG"
 
     echo -n "Waiting for the model to load"
-    for _ in $(seq 1 120); do
+    for _ in $(seq 1 1200); do
         if curl -s "http://localhost:${PORT}/health" >/dev/null 2>&1; then
             echo " — up."
             break
