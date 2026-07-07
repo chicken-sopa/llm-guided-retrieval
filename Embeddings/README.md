@@ -9,12 +9,10 @@ so exact cosine top-k with NumPy is instant.
 | `embed.py` | embedding client (vLLM `/v1/embeddings`); query vs document prefix |
 | `store.py` | in-memory vector index: load embedded chunks → NumPy cosine top-k |
 | `build_index.py` | embed `echr/convention_chunks.json` and cache the vectors in it |
+| `eval_embedding_search.py` | ECtHR top-k eval; reuses `ecthr_evaluation.py` scoring |
 | `config.py` | model registry (query/doc prefixes) |
 | `serve_and_index.sh` | start the vLLM embed server + build the index |
 | `echr/convention_chunks.json` | corpus (one chunk per article; cached embeddings live here) |
-
-The ECtHR evaluation that *uses* these embeddings is
-`src/llm_rl_playground/eval_embedding_search.py`.
 
 ## How it works (no DB)
 
@@ -32,7 +30,7 @@ CUDA_VISIBLE_DEVICES=0 ./Embeddings/serve_and_index.sh
 #    (leaves the embed server running; --overwrite to recompute embeddings)
 
 # 2. evaluate the top-k baseline on ECtHR (reuses ecthr_evaluation scoring)
-python src/llm_rl_playground/eval_embedding_search.py --label embed-topk --n-cases 100 --top-k 10
+python Embeddings/eval_embedding_search.py --label embed-topk --n-cases 100 --top-k 10
 
 # stop the embed server when done
 kill $(cat Embeddings/vllm_embed.pid)
@@ -42,5 +40,5 @@ Or start the server yourself and run the steps manually:
 ```bash
 python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-Embedding-8B --runner pooling --port 8100 &
 python Embeddings/build_index.py
-python src/llm_rl_playground/eval_embedding_search.py --label embed-topk
+python Embeddings/eval_embedding_search.py --label embed-topk
 ```

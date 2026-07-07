@@ -58,4 +58,4 @@ python "$HERE/build_index.py" "$@"
 echo
 echo "Done. The embedding server is still running (needed by the eval)."
 echo "Evaluate with:"
-echo "  python src/llm_rl_playground/eval_embedding_search.py --label embed-topk --n-cases 100 --top-k 10"
+echo "  python Embeddings/eval_embedding_search.py --label embed-topk --n-cases 100 --top-k 10"

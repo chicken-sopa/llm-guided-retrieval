@@ -1,23 +1,22 @@
 """Evaluate plain top-k embedding retrieval on ECtHR cases.
 
 HOW TO USE (embed server must be up + build_index.py must have run first):
-    python src/llm_rl_playground/eval_embedding_search.py --label embed-topk \
+    python Embeddings/eval_embedding_search.py --label embed-topk \
         --n-cases 100 --top-k 10
-Output: src/llm_rl_playground/outputs/ecthr-embed-eval/<label>_ecthr_summary.csv
+Output: Embeddings/outputs/<label>_ecthr_summary.csv
 
 Baseline for the LATTICE comparison. For each case: embed the facts, do an exact
-cosine top-k over the Convention articles, treat the retrieved article ids as the
-predicted alleged-violation articles, and score against the gold labels.
+cosine top-k over the Convention articles (in-memory, from store.py), treat the
+retrieved article ids as the predicted alleged-violation articles, and score
+against the gold labels.
 
-Scoring REUSES ecthr_evaluation.py (same gold extraction and metrics as the
-LATTICE eval) so the comparison is apples-to-apples. Output schema matches the
-LATTICE per-run summary. The embedding ops live in the Embeddings/ folder
-(config, embed, db); this script imports them.
+Scoring REUSES src/llm_rl_playground/ecthr_evaluation.py (same gold extraction
+and metrics as the LATTICE eval) so the comparison is apples-to-apples. Output
+schema matches the LATTICE per-run summary.
 
 Run order:
-    docker compose up -d db vllm-embed        # from repo root
-    python Embeddings/build_index.py          # embed corpus -> pgvector
-    python src/llm_rl_playground/eval_embedding_search.py --label embed-topk-qwen3
+    ./Embeddings/serve_and_index.sh           # start embed server + build the index
+    python Embeddings/eval_embedding_search.py --label embed-topk-qwen3
 """
 from __future__ import annotations
 
@@ -29,9 +28,8 @@ from pathlib import Path
 
 def _add_paths() -> None:
     here = Path(__file__).resolve()
-    repo_root = here.parents[2]
-    sys.path.insert(0, str(repo_root / "src"))         # ecthr_evaluation
-    sys.path.insert(0, str(repo_root / "Embeddings"))  # config, embed, db
+    sys.path.insert(0, str(here.parent))              # Embeddings/ (config, embed, store)
+    sys.path.insert(0, str(here.parents[1] / "src"))  # ecthr_evaluation
 
 
 def build_query(example: dict, max_chars: int = 8000) -> str:
@@ -68,7 +66,7 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
-    parser.add_argument("--output-dir", default=str(here.parent / "outputs" / "ecthr-embed-eval"))
+    parser.add_argument("--output-dir", default=str(here.parent / "outputs"))
     parser.add_argument("--chunks", default=None, help="Path to the embedded chunks json (default: Embeddings/echr/convention_chunks.json).")
     parser.add_argument("--label", default=None)
     args = parser.parse_args()
@@ -78,7 +76,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    chunks_path = args.chunks or (here.parents[2] / "Embeddings" / "echr" / "convention_chunks.json")
+    chunks_path = args.chunks or (here.parent / "echr" / "convention_chunks.json")
     index = VectorIndex.from_chunks_json(chunks_path, cfg.hf_name, normalize_article_label)
     print(f"Loaded in-memory index: {index.size} articles embedded with {cfg.hf_name}.")
 
