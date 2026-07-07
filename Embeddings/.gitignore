@@ -1,9 +1,6 @@
 # Local env
 .env
 
-# Corpus chunks hold cached embeddings (large, model-specific, regenerable)
-echr/*.json
-echr/*.pdf
 
 # vLLM embed server logs/pid
 vllm_embed.log
