@@ -26,7 +26,9 @@ matplotlib==3.10.7
 numpy==2.3.4
 pandas==2.3.3
 plotly==6.3.0
-protobuf==6.33.0
+# vLLM 0.22 excludes protobuf 6.30-6.33.x and needs >=5.29.6; this range fits
+# vLLM + wandb + google-genai.
+protobuf>=5.29.6,<6.30
 scikit_learn==1.7.2
 tqdm==4.66.4
 wandb==0.22.2
