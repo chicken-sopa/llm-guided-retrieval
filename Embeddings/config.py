@@ -64,7 +64,7 @@ MODELS: dict[str, ModelCfg] = {
 ACTIVE_MODEL = _env("ACTIVE_MODEL", "qwen3-emb-8b")
 
 EMBED_BASE_URL = _env("EMBED_BASE_URL", "http://localhost:8100/v1")
-TOP_K = int(_env("TOP_K", "10"))
+TOP_K = int(_env("TOP_K", "3"))
 _min_score = _env("PREDICTION_MIN_SCORE")
 PREDICTION_MIN_SCORE = (
     float(_min_score) if _min_score not in (None, "", "none", "None") else None
