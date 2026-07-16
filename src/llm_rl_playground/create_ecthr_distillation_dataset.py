@@ -698,8 +698,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # --- Traversal / scoring controls ---
     parser.add_argument("--num-iters", type=int, default=10)
-    parser.add_argument("--top-k-leaves", type=int, default=10)
-    parser.add_argument("--prediction-min-score", type=float, default=0.4)
+    parser.add_argument("--top-k-leaves", type=int, default=4)
+    parser.add_argument("--prediction-min-score", type=float, default=0.7)
     parser.add_argument("--max-predicted-articles", type=int, default=None)
     parser.add_argument("--max-beam-size", type=int, default=8)
     parser.add_argument("--relevance-chain-factor", type=float, default=0.5)
@@ -708,8 +708,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-doc-desc-char-len", type=int, default=None)
 
     # --- API controls ---
-    parser.add_argument("--max-concurrent-calls", type=int, default=None)
-    parser.add_argument("--parse-max-concurrent-calls", type=int, default=None)
+    parser.add_argument("--max-concurrent-calls", type=int, default=32)
+    parser.add_argument("--parse-max-concurrent-calls", type=int, default=32)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-retries", type=int, default=4)
     parser.add_argument("--staggering-delay", type=float, default=0.05)
