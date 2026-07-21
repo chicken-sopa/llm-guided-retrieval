@@ -1,0 +1,10 @@
+# Generated per-config trees and summary caches (rebuildable, large)
+trees/
+
+# Per-config LATTICE eval outputs
+runs/
+
+# Keep the aggregated result csv tracked — it's the ablation output.
+
+__pycache__/
+*.pyc
