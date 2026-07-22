@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{llrrrrrr}
+    \toprule
+    Run & Backend & $N$ & P (\%) & R (\%) & F1 (\%) & All gold (\%) & Exact (\%) \\
+    \midrule
+    gemma4-12b-base & vllm & 200 & 23.4 & \textbf{78.4} & 34.2 & \textbf{62.5} & 0.0 \\
+    qwen3-4b-base & vllm & 200 & 9.7 & 48.5 & 15.6 & 34.0 & 0.0 \\
+    qwen3-4b-ecthr-adapter & vllm & 200 & 27.3 & 58.2 & 34.6 & 39.5 & 1.0 \\
+    Qwen-Qwen3.6-27B-FP8 & vllm & 300 & \textbf{68.1} & 68.8 & \textbf{64.4} & 52.3 & \textbf{31.0} \\
+    \bottomrule
+  \end{tabular}
+  \caption{ECtHR results.}
+  \label{tab:ecthr}
+\end{table}
