@@ -1,14 +1,16 @@
-# ablation/
+# tree_depth_ablation/
 
 Tree-depth ablation for LATTICE on the ECtHR task.
 
 ```
-ablation/
+tree_depth_ablation/
 ├── run_tree_depth_ablation.py   # the driver
 ├── trees/                       # one built tree per fanout (cached)
-├── runs/                        # per-config LATTICE eval outputs
+├── output/                      # per-config LATTICE eval outputs
 └── tree_depth_ablation.csv      # ALL configs in one table (the result)
 ```
+
+Corpus: `src/echr/convention_chunks.json` (the ECHR article chunks).
 
 ## What it does
 
@@ -51,7 +53,7 @@ Start a vLLM server first — the script refuses to begin until `/health` respon
 *and* the model is listed (tree building calls the LLM too).
 
 ```bash
-python ablation/run_tree_depth_ablation.py \
+python tree_depth_ablation/run_tree_depth_ablation.py \
   --model "$LATTICE_VLLM_MODEL" --base-url "$VLLM_BASE_URL" \
   --max-children 16 10 4 3 2 --n-cases 50
 ```

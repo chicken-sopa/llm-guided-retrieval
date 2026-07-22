@@ -2,7 +2,7 @@
 trees/
 
 # Per-config LATTICE eval outputs
-runs/
+output/
 
 # Keep the aggregated result csv tracked — it's the ablation output.
 

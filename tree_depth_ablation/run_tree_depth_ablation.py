@@ -27,9 +27,13 @@ REQUIREMENTS
     LATTICE call the LLM).
 
 USAGE
-    python ablation/run_tree_depth_ablation.py \
+    python tree_depth_ablation/run_tree_depth_ablation.py \
         --model "$LATTICE_VLLM_MODEL" --base-url "$VLLM_BASE_URL" \
         --max-children 16 10 4 3 2 --n-cases 50
+
+    Trees are cached in tree_depth_ablation/trees/, per-config eval outputs in
+    tree_depth_ablation/output/, and the aggregated result in
+    tree_depth_ablation/tree_depth_ablation.csv.
 """
 from __future__ import annotations
 
@@ -43,6 +47,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# Outputs live next to this script (survives renaming the folder).
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def _add_paths() -> None:
@@ -191,14 +197,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LATTICE tree-depth ablation on ECtHR.")
     parser.add_argument("--max-children", type=int, nargs="+", default=[16, 10, 4, 3, 2],
                         help="Fanout caps to sweep. Smaller => deeper tree.")
-    parser.add_argument("--chunks", default=str(REPO_ROOT / "Embeddings/echr/convention_chunks.json"))
+    parser.add_argument("--chunks", default=str(REPO_ROOT / "src/echr/convention_chunks.json"))
     parser.add_argument("--model", required=True, help="Model id as served by vLLM.")
     parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--n-cases", type=int, default=50)
     parser.add_argument("--eval-split", default="validation")
-    parser.add_argument("--tree-dir", type=Path, default=REPO_ROOT / "ablation/trees")
-    parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "ablation/runs")
-    parser.add_argument("--out", type=Path, default=REPO_ROOT / "ablation/tree_depth_ablation.csv")
+    # Trees and outputs live inside this script's folder.
+    parser.add_argument("--tree-dir", type=Path, default=SCRIPT_DIR / "trees")
+    parser.add_argument("--run-dir", type=Path, default=SCRIPT_DIR / "output")
+    parser.add_argument("--out", type=Path, default=SCRIPT_DIR / "tree_depth_ablation.csv")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild trees even if cached.")
     parser.add_argument("--vllm-timeout", type=int, default=900)
     args = parser.parse_args()
