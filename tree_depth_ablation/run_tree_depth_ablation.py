@@ -23,9 +23,9 @@ NOTE ON DEPTH
 
 REQUIREMENTS
     - The chunks file must already contain embeddings (key "embeddings"). The
-      bottom-up builder clusters on vectors and does NOT compute them. Embed the
-      corpus once and the vectors are reused for every tree in the sweep:
-          python Embeddings/build_index.py     # embeds Embeddings/echr/convention_chunks.json
+      bottom-up builder clusters on vectors and does NOT compute them. The default
+      --chunks (src/echr/convention_chunks_with_embeddings.json) is the embedded
+      corpus; the vectors are reused for every tree in the sweep.
     - A vLLM server must already be serving --model. The script refuses to start
       until /health responds and the model is listed (both the tree builder and
       LATTICE call the LLM).
@@ -220,8 +220,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LATTICE tree-depth ablation on ECtHR.")
     parser.add_argument("--max-children", type=int, nargs="+", default=[16, 10, 4, 3, 2],
                         help="Fanout caps to sweep. Smaller => deeper tree.")
-    # Use the embedded chunks (build_index.py caches vectors into this file).
-    parser.add_argument("--chunks", default=str(REPO_ROOT / "Embeddings/echr/convention_chunks.json"))
+    # Use the embedded chunks — the builder clusters on the cached vectors.
+    parser.add_argument("--chunks", default=str(REPO_ROOT / "src/echr/convention_chunks_with_embeddings.json"))
     parser.add_argument("--model", required=True, help="Model id as served by vLLM.")
     parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--n-cases", type=int, default=50)
