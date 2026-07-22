@@ -49,8 +49,16 @@ curve, not quality alone.
 
 ## Run
 
-Start a vLLM server first — the script refuses to begin until `/health` responds
-*and* the model is listed (tree building calls the LLM too).
+Prerequisites:
+1. **Embed the corpus once** — the bottom-up builder clusters on vectors and does
+   not compute them, so the chunks must carry embeddings. They are cached in the
+   file and reused for every tree in the sweep:
+   ```bash
+   python Embeddings/build_index.py --chunks src/echr/convention_chunks.json
+   ```
+   (The script checks this up front and aborts with instructions if missing.)
+2. **Start a vLLM server** — the script refuses to begin until `/health` responds
+   *and* the model is listed (tree building calls the LLM too).
 
 ```bash
 python tree_depth_ablation/run_tree_depth_ablation.py \

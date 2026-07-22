@@ -22,9 +22,13 @@ NOTE ON DEPTH
     MEASURE the resulting depth. Smaller fanout => deeper tree.
 
 REQUIREMENTS
-    A vLLM server must already be serving --model. The script refuses to start
-    until /health responds and the model is listed (both the tree builder and
-    LATTICE call the LLM).
+    - The chunks file must already contain embeddings (key "embeddings"). The
+      bottom-up builder clusters on vectors and does NOT compute them. Embed the
+      corpus once and the vectors are reused for every tree in the sweep:
+          python Embeddings/build_index.py --chunks src/echr/convention_chunks.json
+    - A vLLM server must already be serving --model. The script refuses to start
+      until /health responds and the model is listed (both the tree builder and
+      LATTICE call the LLM).
 
 USAGE
     python tree_depth_ablation/run_tree_depth_ablation.py \
@@ -54,6 +58,25 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 def _add_paths() -> None:
     # Unpickling a tree may need SemanticNode importable from src/.
     sys.path.insert(0, str(REPO_ROOT / "src"))
+
+
+def require_embedded_chunks(chunks_path: Path, embedding_field: str = "embeddings") -> None:
+    """Abort early unless every chunk already carries an embedding.
+
+    The tree builder assumes embeddings are present (it clusters on them), so we
+    verify up front rather than letting it fail per-record inside a subprocess.
+    """
+    if not chunks_path.exists():
+        raise SystemExit(f"Chunks file not found: {chunks_path}")
+    chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
+    missing = [i for i, c in enumerate(chunks) if not c.get(embedding_field)]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)}/{len(chunks)} chunks in {chunks_path} have no "
+            f"'{embedding_field}'. Embed them once first, e.g.:\n"
+            f"    python Embeddings/build_index.py --chunks {chunks_path}\n"
+            "(embeddings are cached in the file and reused for every tree)."
+        )
 
 
 # --------------------------------------------------------------------------
@@ -215,6 +238,12 @@ def main() -> None:
     args.tree_dir.mkdir(parents=True, exist_ok=True)
     args.run_dir.mkdir(parents=True, exist_ok=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
+
+    # The bottom-up builder clusters on vectors, so the chunks MUST already carry
+    # embeddings (embed them once with build_index; they are reused for every
+    # tree in the sweep). Fail early and clearly instead of erroring per-record
+    # deep inside the builder subprocess.
+    require_embedded_chunks(Path(args.chunks))
 
     # Gate the whole sweep on vLLM being up (tree building needs it too).
     wait_for_vllm(args.base_url, args.model, timeout=args.vllm_timeout)
