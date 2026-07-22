@@ -82,32 +82,44 @@ def require_embedded_chunks(chunks_path: Path, embedding_field: str = "embedding
 # --------------------------------------------------------------------------
 # vLLM gate: nothing runs until the server is actually serving the model.
 # --------------------------------------------------------------------------
+def _check_one_server(server_url: str, model: str) -> bool:
+    """True if this single server answers /health AND lists `model`."""
+    base = server_url.strip().rstrip("/")
+    health_url = base.removesuffix("/v1") + "/health"
+    models_url = base + "/models"
+    try:
+        with urllib.request.urlopen(health_url, timeout=5) as resp:
+            if resp.status != 200:
+                return False
+    except Exception:
+        print(f"[vllm] waiting for {health_url} ...")
+        return False
+    # /health can be up before the model is registered — verify the id too.
+    try:
+        with urllib.request.urlopen(models_url, timeout=5) as resp:
+            served = [m["id"] for m in json.loads(resp.read())["data"]]
+        if model in served:
+            return True
+        print(f"[vllm] {base}: '{model}' not served yet. Available: {served}")
+    except Exception as exc:
+        print(f"[vllm] {base}: /models not readable yet ({exc})")
+    return False
+
+
 def wait_for_vllm(base_url: str, model: str, timeout: int = 900, interval: int = 10) -> None:
-    """Block until vLLM answers /health AND lists `model`. Raise on timeout."""
-    health_url = base_url.rstrip("/").removesuffix("/v1") + "/health"
-    models_url = base_url.rstrip("/") + "/models"
+    """Block until EVERY server in base_url answers /health AND lists `model`.
+
+    base_url may be a comma-separated list of endpoints (the load-balanced form
+    the eval uses, e.g. "http://localhost:8000/v1,http://localhost:8001/v1").
+    Each endpoint is checked individually — the whole string is NOT one URL.
+    """
+    servers = [u.strip() for u in base_url.split(",") if u.strip()]
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(health_url, timeout=5) as resp:
-                healthy = resp.status == 200
-        except Exception:
-            healthy = False
-
-        if healthy:
-            # /health can be up before the model is registered — verify the id too.
-            try:
-                with urllib.request.urlopen(models_url, timeout=5) as resp:
-                    served = [m["id"] for m in json.loads(resp.read())["data"]]
-                if model in served:
-                    print(f"[vllm] online, serving {model}")
-                    return
-                print(f"[vllm] healthy but '{model}' not served yet. Available: {served}")
-            except Exception as exc:
-                print(f"[vllm] /models not readable yet ({exc})")
-
-        print(f"[vllm] waiting for {health_url} ...")
+        if all(_check_one_server(s, model) for s in servers):
+            print(f"[vllm] online, serving {model} on {len(servers)} server(s)")
+            return
         time.sleep(interval)
 
     raise SystemExit(f"vLLM did not become ready within {timeout}s at {base_url}")
