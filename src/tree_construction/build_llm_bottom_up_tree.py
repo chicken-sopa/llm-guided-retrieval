@@ -332,8 +332,19 @@ class ClusterSummarizer:
             "print_summary_report": False,
             "temperature": 0,
         }
-        if self.args.llm_api_backend in {"local", "localModel"} and self.args.local_serialize_requests:
-            llm_api_kwargs["max_concurrent_calls"] = 1
+
+        # Backend-specific kwarg cleanup, mirroring run.py so each backend only
+        # gets params it accepts. vLLM drops response_schema too (no guided_json;
+        # the JSON is repaired afterward), which avoids strict-schema rejections.
+        if self.args.llm_api_backend == "vllm":
+            llm_api_kwargs.pop("response_mime_type", None)
+            llm_api_kwargs.pop("response_schema", None)
+        elif self.args.llm_api_backend == "openai":
+            llm_api_kwargs.pop("response_mime_type", None)
+        elif self.args.llm_api_backend in {"local", "localModel"}:
+            llm_api_kwargs.pop("response_mime_type", None)
+            if self.args.local_serialize_requests:
+                llm_api_kwargs["max_concurrent_calls"] = 1
         return api, llm_api_kwargs
 
     def summarize_clusters(
