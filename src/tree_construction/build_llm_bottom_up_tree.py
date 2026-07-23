@@ -306,6 +306,10 @@ class ClusterSummarizer:
                 timeout=self.args.llm_api_timeout,
                 max_retries=self.args.llm_api_max_retries,
                 base_url=self.args.vllm_base_url,
+                # Thinking models (e.g. Qwen3) emit a <think> block before the
+                # JSON, which breaks the strict schema parse. Disable it so the
+                # summary response is clean JSON.
+                enable_thinking=False,
             )
         elif self.args.llm_api_backend in {"local", "localModel"}:
             api = LocalModelAPI(
