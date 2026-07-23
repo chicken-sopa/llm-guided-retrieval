@@ -167,7 +167,13 @@ def case_facts_from_query(query: str) -> str:
 
 
 def extract_articles_from_tree_text(text: str) -> set[str]:
-    """Extract normalized article IDs from retrieved EU conventions tree leaves."""
+    """Extract normalized article IDs from retrieved EU conventions tree leaves.
+
+    Legacy fallback: recovers the article identity by regex-scraping the leaf's
+    prose. This is lossy (a bare "ARTICLE 2" cannot tell the Convention's
+    Article 2 apart from a Protocol's Article 2) and format-fragile, so it is
+    only used when a leaf carries no canonical id (see article_id_from_node).
+    """
     predictions = set()
     for match in TREE_ARTICLE_RE.finditer(text or ""):
         article = match.group("article").lower()
@@ -177,6 +183,30 @@ def extract_articles_from_tree_text(text: str) -> set[str]:
         else:
             predictions.add(f"article_{article}")
     return predictions
+
+
+def article_id_from_node(node: Any) -> set[str]:
+    """Return the leaf's article identity from its canonical id, not its prose.
+
+    Leaf chunks are stamped with a canonical id in the SAME space as the gold
+    labels (e.g. "article_3", "protocol_1_article_2"), carried through tree
+    construction into node.id / node.metadata["source_id"]. Reading it here is
+    unambiguous and independent of how the leaf text happens to be worded.
+
+    Falls back to scraping the leaf text only when no canonical id is present
+    (e.g. an older tree built before ids were stamped), so old caches still work.
+    """
+    candidates = [getattr(node, "id", None)]
+    metadata = getattr(node, "metadata", None)
+    if isinstance(metadata, dict):
+        candidates.append(metadata.get("source_id"))
+
+    for candidate in candidates:
+        normalized = normalize_article_label(candidate)
+        if normalized:
+            return {normalized}
+
+    return extract_articles_from_tree_text(getattr(node, "desc", "") or "")
 
 
 def predicted_articles_from_sample(
@@ -193,7 +223,7 @@ def predicted_articles_from_sample(
         return float(getattr(node, "local_relevance", 0.0))
 
     for rank, (node, score) in enumerate(sample.get_top_predictions(k=k, rel_fn=leaf_local_score), start=1):
-        article_ids = extract_articles_from_tree_text(node.desc)
+        article_ids = article_id_from_node(node)
         passes_filters = bool(article_ids) and (min_score is None or float(score) >= min_score)
         included = False
 
