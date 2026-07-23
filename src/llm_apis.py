@@ -1644,6 +1644,12 @@ class VllmAPI(LanguageModelAPI):
         config_params.pop('max_retries', None)
         config_params.pop('timeout', None)
         config_params.pop('prompt_index', None)
+        # Google GenAI-only params that some callers pass unconditionally; the
+        # OpenAI-compatible chat.completions endpoint rejects them.
+        config_params.pop('response_mime_type', None)
+        config_params.pop('thinking_config', None)
+        config_params.pop('print_summary_report', None)
+        config_params.pop('staggering_delay', None)
 
         # Handle response_schema for constrained decoding
         response_schema = config_params.pop('response_schema', None)
