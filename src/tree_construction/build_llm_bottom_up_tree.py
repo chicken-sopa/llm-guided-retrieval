@@ -338,6 +338,7 @@ class ClusterSummarizer:
         # the JSON is repaired afterward), which avoids strict-schema rejections.
         if self.args.llm_api_backend == "vllm":
             llm_api_kwargs.pop("response_mime_type", None)
+            llm_api_kwargs.pop("thinking_config", None)
             llm_api_kwargs.pop("response_schema", None)
         elif self.args.llm_api_backend == "openai":
             llm_api_kwargs.pop("response_mime_type", None)
