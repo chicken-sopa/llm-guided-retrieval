@@ -202,6 +202,8 @@ def run_lattice(tree_path: Path, num_iters: int, label: str, args) -> Path:
         "--eval-split", args.eval_split,
         "--label", label,
         "--output-dir", str(args.run_dir),
+        "--max-concurrent-calls", 24,
+        "--parse-max-concurrent-calls", 32,
     ]
     print(f"[lattice] {label}: num_iters={num_iters}, n_cases={args.n_cases}")
     subprocess.run(cmd, check=True)
@@ -244,6 +246,10 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=SCRIPT_DIR / "tree_depth_ablation.csv")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild trees even if cached.")
     parser.add_argument("--vllm-timeout", type=int, default=900)
+    # ECHR task options 
+    parser.add_argument("--max-concurrent-calls", type=int, default=32)
+    parser.add_argument("--parse-max-concurrent-calls", type=int, default=64)
+    
     args = parser.parse_args()
 
     import pandas as pd
