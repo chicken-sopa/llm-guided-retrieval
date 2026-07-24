@@ -202,8 +202,8 @@ def run_lattice(tree_path: Path, num_iters: int, label: str, args) -> Path:
         "--eval-split", args.eval_split,
         "--label", label,
         "--output-dir", str(args.run_dir),
-        "--max-concurrent-calls", 24,
-        "--parse-max-concurrent-calls", 32,
+        "--max-concurrent-calls", str(args.max_concurrent_calls),
+        "--parse_max-concurrent-calls", str(args.parse_max_concurrent_calls),
     ]
     print(f"[lattice] {label}: num_iters={num_iters}, n_cases={args.n_cases}")
     subprocess.run(cmd, check=True)
