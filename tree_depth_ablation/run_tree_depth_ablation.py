@@ -203,7 +203,7 @@ def run_lattice(tree_path: Path, num_iters: int, label: str, args) -> Path:
         "--label", label,
         "--output-dir", str(args.run_dir),
         "--max-concurrent-calls", str(args.max_concurrent_calls),
-        "--parse_max-concurrent-calls", str(args.parse_max_concurrent_calls),
+        "--parse-max-concurrent-calls", str(args.parse_max_concurrent_calls),
     ]
     print(f"[lattice] {label}: num_iters={num_iters}, n_cases={args.n_cases}")
     subprocess.run(cmd, check=True)
