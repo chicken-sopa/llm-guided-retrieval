@@ -776,7 +776,11 @@ def main() -> None:
         lr_scheduler_type="constant",
         max_grad_norm=0.3,
         gradient_checkpointing=True,
-        ddp_find_unused_parameters=False if world_size() > 1 else None,
+        # True so DDP tolerates params that get no gradient. Needed for
+        # multimodal models (e.g. Gemma 4 unified) where "all-linear" LoRA also
+        # targets vision/audio towers that text-only training never exercises.
+        # Harmless for text-only models (Qwen) where all LoRA params are used.
+        ddp_find_unused_parameters=True if world_size() > 1 else None,
         report_to="none",
         remove_unused_columns=False,
         seed=args.seed,
