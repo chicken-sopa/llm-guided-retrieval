@@ -246,6 +246,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=SCRIPT_DIR / "tree_depth_ablation.csv")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild trees even if cached.")
     parser.add_argument("--vllm-timeout", type=int, default=900)
+    # Metric-vs-depth plots are generated from the aggregated results once the
+    # sweep finishes (see plot_tree_depth_metrics.py).
+    parser.add_argument("--plot-dir", type=Path, default=SCRIPT_DIR / "plots",
+                        help="Folder for the metric-vs-depth PNGs.")
+    parser.add_argument("--no-plot", dest="plot", action="store_false",
+                        help="Skip generating metric-vs-depth plots at the end.")
     # ECHR task options 
     parser.add_argument("--max-concurrent-calls", type=int, default=32)
     parser.add_argument("--parse-max-concurrent-calls", type=int, default=64)
@@ -299,15 +305,37 @@ def main() -> None:
             print(f"[error] max_children={max_children}: {exc}", file=sys.stderr)
 
         records.append(record)
-        # Write after every config so a crash never loses completed runs.
+        # Write after every config so a crash never loses completed runs. Both a
+        # CSV (human table) and a JSON (fed to the plotter) are kept in sync.
+        out_json = args.out.with_suffix(".json")
         pd.DataFrame(records).to_csv(args.out, index=False)
+        pd.DataFrame(records).to_json(out_json, orient="records", indent=2)
 
     df = pd.DataFrame(records).sort_values("depth", na_position="last")
     df.to_csv(args.out, index=False)
+    df.to_json(out_json, orient="records", indent=2)
     print("\n================ Tree-depth ablation ================")
     print(df.to_string(index=False))
     print(f"\nSaved: {args.out}")
+    print(f"Saved: {out_json}")
     print("Note: rows with coverage ~0 never reached leaf articles — treat as invalid.")
+
+    # Metric-vs-depth plots from the aggregated results. Kept in a try/except so a
+    # plotting/matplotlib problem never invalidates a completed (expensive) sweep.
+    if args.plot:
+        try:
+            sys.path.insert(0, str(SCRIPT_DIR))
+            from plot_tree_depth_metrics import generate_plots
+
+            plot_dir = generate_plots(
+                out_json,
+                args.plot_dir,
+                metrics=("precision", "recall", "f1"),
+                depth_col="depth",
+            )
+            print(f"Saved metric-vs-depth plots to {plot_dir}")
+        except Exception as exc:
+            print(f"[warn] plotting failed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":
