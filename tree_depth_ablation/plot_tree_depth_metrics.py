@@ -191,8 +191,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plot ECtHR metrics vs tree depth.")
     parser.add_argument(
         "--input", "-i", type=Path,
-        default=script_dir / "tree_depth_ablation.json",
-        help="Aggregated ablation results file (.json or .csv).",
+        default=script_dir / "tree_depth_ablation.csv",
+        help="Aggregated ablation results file (.csv or .json).",
     )
     parser.add_argument(
         "--output-dir", "-o", type=Path, default=None,

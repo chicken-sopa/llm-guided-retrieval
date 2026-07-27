@@ -328,7 +328,7 @@ def main() -> None:
             from plot_tree_depth_metrics import generate_plots
 
             plot_dir = generate_plots(
-                out_json,
+                args.out,
                 args.plot_dir,
                 metrics=("precision", "recall", "f1"),
                 depth_col="depth",

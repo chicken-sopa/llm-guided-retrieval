@@ -379,8 +379,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use-llm-selector", action="store_true")
 
     # --- API controls ---
-    parser.add_argument("--max-concurrent-calls", type=int, default=None)
-    parser.add_argument("--parse-max-concurrent-calls", type=int, default=None)
+    parser.add_argument("--max-concurrent-calls", type=int, default=32)
+    parser.add_argument("--parse-max-concurrent-calls", type=int, default=32)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-retries", type=int, default=4)
     parser.add_argument("--staggering-delay", type=float, default=0.05)
