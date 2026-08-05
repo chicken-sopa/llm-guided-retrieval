@@ -412,6 +412,30 @@ class EcthrTraversalEvaluator:
             if key not in {"parse_max_concurrent_calls"}
         }
 
+    def _lattice_retriever(self):
+        """The shared LatticeRetriever (src/lattice.py) that backs traversal, built once and cached.
+
+        Traversal is delegated to it so there is a single loop implementation across the codebase;
+        the ECtHR-specific scoring / selector / article logic stays here on top. `get_llm_run_kwargs()`
+        is passed through so the retriever's batch calls match this evaluator's. (The parse helpers
+        below are kept for external/notebook callers but are no longer used by the traversal path.)
+        """
+        from lattice import LatticeRetriever
+
+        retriever = getattr(self, "_lattice_retriever_cache", None)
+        if retriever is None:
+            retriever = LatticeRetriever(
+                self.semantic_root_node,
+                self.node_registry,
+                self.hp,
+                self.logger,
+                self.llm_api,
+                self.get_llm_run_kwargs(),
+                show_error_logs=self.show_error_logs,
+            )
+            self._lattice_retriever_cache = retriever
+        return retriever
+
     def parse_traversal_response_or_none(
         self,
         output: Any,
@@ -532,41 +556,23 @@ class EcthrTraversalEvaluator:
         num_iters: int,
         detailed_logs: bool = False,
     ) -> None:
-        """Run traversal iterations for many samples using one shared async LLM batch per step."""
+        """Run traversal iterations for many samples via the shared LatticeRetriever engine.
+
+        Delegates each batch step to `LatticeRetriever.traverse_samples_async` (src/lattice.py),
+        stepping one iteration at a time so the per-iteration progress banner and optional frontier
+        logging are preserved. Sample states, parsing/repair, and results match the previous in-house
+        loop (the retriever uses the same parse+repair layer that was ported from this evaluator).
+        """
+        retriever = self._lattice_retriever()
         for step in range(num_iters):
             print(f"\n--- Batched iteration {step + 1}/{num_iters} ({len(samples)} cases) ---")
-            inputs_by_sample = [sample.get_step_prompts() for sample in samples]
-            counts = [len(inputs) for inputs in inputs_by_sample]
-            flat_inputs = [item for inputs in inputs_by_sample for item in inputs]
-            if not flat_inputs:
+            steps_run = await retriever.traverse_samples_async(samples, num_iters=1)
+            if steps_run == 0:
                 print("No prompts left to process.")
                 break
-
-            flat_prompts = [prompt for prompt, _ in flat_inputs]
-            flat_slates = [slate for _, slate in flat_inputs]
-            raw_responses = await self.llm_api.run_batch(flat_prompts, **self.get_llm_run_kwargs())
-            flat_response_jsons = await self.parse_traversal_responses_async(
-                raw_responses,
-                prompts=flat_prompts,
-                step=step,
-            )
-            skipped_count = sum(response_json is None for response_json in flat_response_jsons)
-            if skipped_count and self.show_error_logs:
-                self.logger.warning(
-                    "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
-                    skipped_count,
-                    len(flat_response_jsons),
-                )
-
-            offset = 0
-            for sample, count in zip(samples, counts):
-                sample_slates = flat_slates[offset : offset + count]
-                sample_response_jsons = flat_response_jsons[offset : offset + count]
-                if count:
-                    sample.update(sample_slates, sample_response_jsons)
-                    if detailed_logs:
-                        self.print_frontier(sample)
-                offset += count
+            if detailed_logs:
+                for sample in samples:
+                    self.print_frontier(sample)
 
     async def select_articles_with_llm_batch_async(
         self,
@@ -780,38 +786,45 @@ class EcthrTraversalEvaluator:
         }
 
     async def run_query_async(self, query: str, num_iters: int = 4, detailed_logs: bool = False) -> InferSample:
+        """Run traversal for a single query via the shared LatticeRetriever engine.
+
+        Delegates each step to `LatticeRetriever.traverse_samples_async` (src/lattice.py), stepping
+        one iteration at a time to preserve the per-iteration banner and, under `detailed_logs`, the
+        frontier and reasoning preview.
+        """
         sample = self.make_sample(query)
         if detailed_logs:
             print(f"Running traversal for query: {query}")
 
+        retriever = self._lattice_retriever()
         for step in range(num_iters):
             print(f"\n--- Iteration {step + 1} ---")
-            inputs = sample.get_step_prompts()
-            prompts = [prompt for prompt, _ in inputs]
-            slates = [slate for _, slate in inputs]
-            raw_responses = await self.llm_api.run_batch(prompts, **self.get_llm_run_kwargs())
-
-            response_jsons = await self.parse_traversal_responses_async(
-                raw_responses,
-                prompts=prompts,
-                step=step,
-            )
-            skipped_count = sum(response_json is None for response_json in response_jsons)
-            if skipped_count and self.show_error_logs:
-                self.logger.warning(
-                    "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
-                    skipped_count,
-                    len(response_jsons),
-                )
-            sample.update(slates, response_jsons)
+            steps_run = await retriever.traverse_samples_async([sample], num_iters=1)
+            if steps_run == 0:
+                break
             if detailed_logs:
                 self.print_frontier(sample)
-                if response_jsons:
-                    first_valid_response = next((item for item in response_jsons if isinstance(item, dict)), None)
-                    if first_valid_response:
-                        print("\nReasoning preview:")
-                        print(str(first_valid_response.get("reasoning", ""))[:800])
+                reasoning = self._latest_step_reasoning(sample)
+                if reasoning:
+                    print("\nReasoning preview:")
+                    print(str(reasoning)[:800])
         return sample
+
+    @staticmethod
+    def _latest_step_reasoning(sample: InferSample) -> str:
+        """Reasoning recorded on the nodes expanded in the most recent step (for detailed logs).
+
+        The step's parsed responses are consumed inside the retriever, but each expanded node keeps
+        its `reasoning`, so we read it back here instead of re-plumbing the raw responses out.
+        """
+        history = getattr(sample, "beam_state_paths_history", None) or []
+        if not history:
+            return ""
+        for state_path in history[-1]:
+            reasoning = getattr(state_path[-1], "reasoning", "")
+            if reasoning:
+                return reasoning
+        return ""
 
     def run_query(self, query: str, num_iters: int = 4, detailed_logs: bool = False) -> InferSample:
         from tree_construction.build_llm_bottom_up_tree import run_coro_sync

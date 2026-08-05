@@ -13,6 +13,7 @@ from hyperparams import HyperParams
 from tree_objects import SemanticNode, InferSample
 from llm_apis import GenAIAPI, LocalModelAPI, VllmAPI
 from llm_apis import OpenAIResponsesAPI
+from lattice import LatticeRetriever
 from prompts import get_traversal_prompt_response_constraint, get_reranking_prompt
 from utils import (
     setup_logger, 
@@ -131,26 +132,20 @@ logger.info('Hyperparams:\n'+'\n'.join([f'{k}:\t{v}' for k, v in vars(hp).items(
 #endregion
 
 #region Run Retrieval Loop
-async def retrieval_loop_step():  # Make the function asynchronous
-    inputs = [sample.get_step_prompts() for sample in all_eval_samples]
-    indptr = np.cumsum([0, *[len(x) for x in inputs]])
-    flat_inputs = [y for x in inputs for y in x]
-    flat_prompts, flat_slates = list(zip(*flat_inputs))
-    slates = [flat_slates[indptr[j]:indptr[j+1]] for j in range(len(inputs))]
-
-    flat_responses = await llm_api.run_batch(flat_prompts, **llm_api_kwargs)
-    flat_response_jsons = [post_process(output, return_json=True) for output in tqdm(flat_responses)]
-    response_jsons = [flat_response_jsons[indptr[j]:indptr[j+1]] for j in range(len(inputs))]
-
-    for sample, sample_slates, sample_response_jsons in tqdm(zip(all_eval_samples, slates, response_jsons), total=len(all_eval_samples), desc='Updating samples'):
-      sample.update(sample_slates, sample_response_jsons)
+# Traversal runs through the shared LatticeRetriever engine (src/lattice.py). We step one
+# iteration at a time so the per-iteration gold metrics, wandb logging, and checkpoint/resume
+# below stay exactly as before -- the samples are stateful and accumulate across calls.
+# show_error_logs=True preserves run.py's previously verbose parse-error logging.
+retriever = LatticeRetriever(
+    semantic_root_node, node_registry, hp, logger, llm_api, llm_api_kwargs, show_error_logs=True,
+)
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 try:
     for i in tqdm(range(len(all_eval_metric_dfs), hp.NUM_ITERS)):
         logger.info(f'-------------------- Iter {i} --------------------')
-        loop.run_until_complete(retrieval_loop_step())
+        loop.run_until_complete(retriever.traverse_samples_async(all_eval_samples, num_iters=1))
         eval_metric_df = pd.DataFrame([sample.compute_eval_metrics(k=10) for sample in all_eval_samples])
         all_eval_metric_dfs.append(eval_metric_df)
         

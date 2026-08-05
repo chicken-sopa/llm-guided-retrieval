@@ -296,79 +296,34 @@ async def run_lattice_with_trace_async(
     num_iters: int,
     detailed_logs: bool = False,
 ) -> list[dict[str, Any]]:
-    """Run LATTICE externally while recording each teacher decision.
+    """Run LATTICE over the ECtHR samples while recording each teacher decision for distillation.
 
-    This mirrors EcthrTraversalEvaluator.run_lattice_iterations_for_samples_async, but keeps
-    the recording logic outside the normal evaluator. Each iteration gathers the current
-    prompts, asks the teacher model, stores prompt/response metadata, then updates the samples.
+    Thin adapter over `TracingLatticeRetriever` (src/lattice.py): the traversal is the shared base
+    loop used everywhere else, and the tracing subclass overrides only the `_record_step` seam to
+    capture every (case, step, prompt, slate, raw_response, parsed_response). Because the loop and
+    the parse/repair layer are exactly the ones used at inference, the recorded parsed responses --
+    and therefore the distilled training rows -- are identical to a normal run.
+
+    Signature-compatible with the previous hand-rolled loop: same inputs, same trace-row shape, so
+    `make_training_rows` / `build_results_from_samples` are unchanged. The `evaluator` is used purely
+    as the already-built container of (tree, registry, hp, logger, teacher `llm_api`, `llm_api_kwargs`);
+    no ECtHR-specific behavior is invoked here.
     """
-    trace_rows: list[dict[str, Any]] = []
+    from lattice import TracingLatticeRetriever
 
-    for step in range(num_iters):
-        print(f"\n--- Teacher distillation iteration {step + 1}/{num_iters} ({len(samples)} cases) ---")
-        # LATTICE exposes prompts per sample; flatten them so the teacher can process one efficient batch.
-        inputs_by_sample = [sample.get_step_prompts() for sample in samples]
-        counts = [len(inputs) for inputs in inputs_by_sample]
-        flat_inputs = [item for inputs in inputs_by_sample for item in inputs]
-        if not flat_inputs:
-            print("No prompts left to process.")
-            break
-
-        flat_prompts = [prompt for prompt, _ in flat_inputs]
-        flat_slates = [slate for _, slate in flat_inputs]
-        # Use the same LLM wrapper/schema parser as evaluation so the teacher rows match inference behavior.
-        raw_responses = await evaluator.llm_api.run_batch(flat_prompts, **evaluator.get_llm_run_kwargs())
-        flat_response_jsons = await evaluator.parse_traversal_responses_async(
-            raw_responses,
-            prompts=flat_prompts,
-            step=step,
-        )
-
-        skipped_count = sum(response_json is None for response_json in flat_response_jsons)
-        if skipped_count and evaluator.show_error_logs:
-            evaluator.logger.warning(
-                "Skipped %s/%s traversal response(s) because they were still badly formatted after repair.",
-                skipped_count,
-                len(flat_response_jsons),
-            )
-
-        offset = 0
-        for sample_idx, (sample, count) in enumerate(zip(samples, counts)):
-            # Slice the flat batch back into the prompts that belonged to this case/sample.
-            sample_prompts = flat_prompts[offset : offset + count]
-            sample_slates = flat_slates[offset : offset + count]
-            sample_raw_responses = raw_responses[offset : offset + count]
-            sample_response_jsons = flat_response_jsons[offset : offset + count]
-            case_index = case_indexes[sample_idx]
-
-            for prompt, slate, raw_response, parsed_response in zip(
-                sample_prompts,
-                sample_slates,
-                sample_raw_responses,
-                sample_response_jsons,
-            ):
-                trace_rows.append(
-                    {
-                        "case_index": case_index,
-                        "step": step,
-                        "prompt": prompt,
-                        "slate": slate,
-                        "raw_response": raw_response,
-                        "parsed_response": parsed_response,
-                        "valid": parsed_response is not None,
-                        "query": sample.query,
-                        "teacher_model": getattr(evaluator.llm_api, "model_name", None),
-                    }
-                )
-
-            if count:
-                # Updating the sample advances LATTICE so the next iteration records the teacher's next decisions.
-                sample.update(sample_slates, sample_response_jsons)
-                if detailed_logs:
-                    evaluator.print_frontier(sample)
-            offset += count
-
-    return trace_rows
+    retriever = TracingLatticeRetriever(
+        evaluator.semantic_root_node,
+        evaluator.node_registry,
+        evaluator.hp,
+        evaluator.logger,
+        evaluator.llm_api,
+        evaluator.get_llm_run_kwargs(),
+        show_error_logs=evaluator.show_error_logs,
+        case_indexes=case_indexes,
+        detailed_logs=detailed_logs,
+    )
+    await retriever.traverse_samples_async(samples, num_iters=num_iters)
+    return retriever.trace_rows
 
 
 def make_training_rows(trace_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
