@@ -24,7 +24,7 @@ NOTE ON DEPTH
 REQUIREMENTS
     - The chunks file must already contain embeddings (key "embeddings"). The
       bottom-up builder clusters on vectors and does NOT compute them. The default
-      --chunks (src/echr/convention_chunks_with_embeddings.json) is the embedded
+      --chunks (corpora/ECHR/convention/chunks_with_embeddings.json) is the embedded
       corpus; the vectors are reused for every tree in the sweep.
     - A vLLM server must already be serving --model. The script refuses to start
       until /health responds and the model is listed (both the tree builder and
@@ -35,7 +35,7 @@ USAGE
         --model "$LATTICE_VLLM_MODEL" --base-url "$VLLM_BASE_URL" \
         --max-children 16 10 4 3 2 --n-cases 50
 
-    Trees are cached in tree_depth_ablation/trees/, per-config eval outputs in
+    Trees are cached in corpora/ECHR/convention/trees/, per-config eval outputs in
     tree_depth_ablation/output/, and the aggregated result in
     tree_depth_ablation/tree_depth_ablation.csv.
 """
@@ -172,7 +172,7 @@ def build_tree(max_children: int, args, tree_path: Path) -> float:
         "--input", str(args.chunks),
         "--output", str(tree_path),
         "--max-children", str(max_children),
-        # Reuse the embeddings already cached in convention_chunks.json so the
+        # Reuse the embeddings already cached in chunks_with_embeddings.json so the
         # ablation does not re-embed the corpus for every fanout setting.
         "--text-field", "text",
         "--embedding-field", "embeddings",
@@ -235,13 +235,15 @@ def main() -> None:
     parser.add_argument("--max-children", type=int, nargs="+", default=[16, 10, 4, 3, 2],
                         help="Fanout caps to sweep. Smaller => deeper tree.")
     # Use the embedded chunks — the builder clusters on the cached vectors.
-    parser.add_argument("--chunks", default=str(REPO_ROOT / "src/echr/convention_chunks_with_embeddings.json"))
+    parser.add_argument("--chunks",
+                        default=str(REPO_ROOT / "corpora/ECHR/convention/chunks_with_embeddings.json"))
     parser.add_argument("--model", required=True, help="Model id as served by vLLM.")
     parser.add_argument("--base-url", default="http://localhost:8000/v1")
     parser.add_argument("--n-cases", type=int, default=50)
     parser.add_argument("--eval-split", default="validation")
     # Trees and outputs live inside this script's folder.
-    parser.add_argument("--tree-dir", type=Path, default=SCRIPT_DIR / "trees")
+    parser.add_argument("--tree-dir", type=Path,
+                        default=REPO_ROOT / "corpora/ECHR/convention/trees")
     parser.add_argument("--run-dir", type=Path, default=SCRIPT_DIR / "output")
     parser.add_argument("--out", type=Path, default=SCRIPT_DIR / "tree_depth_ablation.csv")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild trees even if cached.")
@@ -275,7 +277,7 @@ def main() -> None:
 
     records = []
     for max_children in args.max_children:
-        tree_path = args.tree_dir / f"tree-mc{max_children}.pkl"
+        tree_path = args.tree_dir / f"tree-bottom-up-mc{max_children}.pkl"
         record = {"max_children": max_children}
         try:
             # 1. build (cached) and 2. measure the tree that resulted

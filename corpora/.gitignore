@@ -1,0 +1,15 @@
+# Corpus artifacts: what is tracked here mirrors what was tracked before the
+# per-corpus restructure -- moving files must not silently change git's contents.
+#
+# The ECHR trees are the tree-depth ablation sweep. They lived in
+# tree_depth_ablation/trees/, which ignored them as "generated per-config and
+# rebuildable", and they stay ignored here. Everything else a corpus needs
+# (chunks.json, chunks_with_embeddings.json, manifest.json) stays tracked, so a
+# fresh clone can rebuild any ignored tree with:
+#
+#     python build_tree.py --dataset ECHR --subset convention \
+#         --tree-version bottom-up-mc10 --max-children 10 --llm <model>
+#
+ECHR/convention/trees/*.pkl
+ECHR/convention/trees/*.json
+ECHR/convention/trees/summary_cache_*.json

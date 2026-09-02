@@ -779,7 +779,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", help="Optional path to a local .json or .jsonl corpus file.")
     parser.add_argument("--dataset", default="BRIGHT", help="Dataset name used for defaults.")
     parser.add_argument("--subset", help="Corpus subset name, used for loading and output paths.")
-    parser.add_argument("--output", help="Output pickle path. Defaults to trees/<dataset>/<subset>/tree-bottom-up-llm.pkl")
+    parser.add_argument("--output", help="Output pickle path. Defaults to corpora/<dataset>/<subset>/trees/tree-bottom-up-llm.pkl")
     parser.add_argument("--json-output", help="Optional JSON copy of the produced tree.")
     parser.add_argument("--log-file", help="Optional log file path.")
 
@@ -829,7 +829,8 @@ def resolve_output_paths(args: argparse.Namespace) -> tuple[Path, Path | None, P
     else:
         if not args.subset:
             raise ValueError("--output is required when --subset is not provided")
-        output_path = SRC_DIR.parent / "trees" / args.dataset / args.subset / "tree-bottom-up-llm.pkl"
+        output_path = (SRC_DIR.parent / "corpora" / args.dataset / args.subset
+                       / "trees" / "tree-bottom-up-llm.pkl")
 
     json_output_path = Path(args.json_output) if args.json_output else output_path.with_suffix(".json")
 

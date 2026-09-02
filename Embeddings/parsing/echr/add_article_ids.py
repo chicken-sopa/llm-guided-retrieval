@@ -22,11 +22,12 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from llm_rl_playground.ecthr_evaluation import normalize_article_label  # noqa: E402
 
 # Files to stamp. The embedded file is the one the ablation actually consumes;
-# the plain file is kept in sync so a re-embed stays consistent.
+# the plain file is kept in sync so a re-embed stays consistent. (Both now live in
+# the dataset folder; the former third copy was a byte-identical duplicate.)
+DATASET = REPO_ROOT / "corpora/ECHR/convention"
 TARGETS = [
-    REPO_ROOT / "src/echr/convention_chunks_with_embeddings.json",
-    REPO_ROOT / "src/echr/convention_chunks.json",
-    REPO_ROOT / "Embeddings/echr/convention_chunks.json",
+    DATASET / "chunks_with_embeddings.json",
+    DATASET / "chunks.json",
 ]
 
 

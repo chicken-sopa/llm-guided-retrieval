@@ -1,0 +1,51 @@
+{
+  "dataset": "EU",
+  "subset": "eu_conventions_notebook",
+  "note": "EU convention corpus. Tree was built from a notebook; build parameters were not recorded.",
+  "generated": "2026-09-02",
+  "chunks": {
+    "path": "chunks.json",
+    "format": "wrapped",
+    "count": 361,
+    "md5": "94a405ca9f0bc723e91127de1a30e538",
+    "fields": [
+      "article_number",
+      "article_title",
+      "chunk_id",
+      "chunk_type",
+      "citation",
+      "document_abbreviation",
+      "document_title",
+      "document_type",
+      "embedding",
+      "jurisdiction",
+      "language",
+      "page_end",
+      "page_start",
+      "point_number",
+      "protocol_number",
+      "protocol_title",
+      "section_number",
+      "section_title",
+      "source_id",
+      "source_path",
+      "subpoint_letter",
+      "text"
+    ],
+    "id_field": null,
+    "text_field": null,
+    "embedding_field": null,
+    "embedded_copy": null
+  },
+  "trees": [
+    {
+      "path": "trees/tree-bottom-up-llm.pkl",
+      "tree_version": "bottom-up-llm",
+      "leaves": 361,
+      "depth": 8,
+      "size_bytes": 8057629,
+      "build": {},
+      "provenance": "verified: leaf count == chunk count"
+    }
+  ]
+}

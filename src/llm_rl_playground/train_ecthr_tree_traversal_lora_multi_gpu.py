@@ -43,7 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tree-path",
         default=None,
-        help="Path to EU semantic tree JSON. Defaults to repo trees/EU/eu_conventions_notebook/eu_conventions_tree-bottom-up-llm.json.",
+        help="Path to EU semantic tree JSON. Defaults to repo "
+             "corpora/EU/eu_conventions_notebook/trees/tree-bottom-up-llm.json.",
     )
     parser.add_argument(
         "--output-dir",
@@ -464,7 +465,8 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
     from prompts import get_traversal_prompt_response_constraint
     from utils import compute_node_registry, setup_logger
 
-    default_eval_tree_path = repo_root / "trees" / "EU" / "eu_conventions_notebook" / "eu_conventions_tree-bottom-up-llm.pkl"
+    default_eval_tree_path = (repo_root / "corpora" / "EU" / "eu_conventions_notebook"
+                              / "trees" / "tree-bottom-up-llm.pkl")
     eval_tree_path = Path(args.ecthr_eval_tree_path) if args.ecthr_eval_tree_path else default_eval_tree_path
     if not eval_tree_path.exists():
         eval_tree_path = train_tree_path
@@ -711,7 +713,7 @@ def main() -> None:
 
     repo_root = repo_root_from_script()
     tree_path = Path(args.tree_path) if args.tree_path else (
-        repo_root / "trees" / "EU" / "eu_conventions_notebook" / "eu_conventions_tree-bottom-up-llm.json"
+        repo_root / "corpora" / "EU" / "eu_conventions_notebook" / "trees" / "tree-bottom-up-llm.json"
     )
     if args.output_dir:
         output_dir = Path(args.output_dir).expanduser()

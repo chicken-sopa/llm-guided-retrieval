@@ -5,9 +5,9 @@ plain nested dict compatible with ``tree_objects.SemanticNode.load_dict``.
 
 Example:
     python src/tree_construction/build_civil_code_tree.py \
-      --input src/tree_construction/codigo_civil_chunks_sample.json \
-      --output trees/PT/codigo_civil/tree-bottom-up.pkl \
-      --json-output trees/PT/codigo_civil/tree-bottom-up.json
+      --input corpora/PT/codigo_civil_notebook/chunks.json \
+      --output corpora/PT/codigo_civil_notebook/trees/tree-bottom-up.pkl \
+      --json-output corpora/PT/codigo_civil_notebook/trees/tree-bottom-up.json
 """
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ tree_depth_ablation/
 └── tree_depth_ablation.csv      # ALL configs in one table (the result)
 ```
 
-Corpus: `src/echr/convention_chunks_with_embeddings.json` (ECHR article chunks
+Corpus: `corpora/ECHR/convention/chunks_with_embeddings.json` (ECHR article chunks
 **with cached embeddings** — the builder clusters on those vectors).
 
 ## What it does
@@ -53,7 +53,7 @@ curve, not quality alone.
 Prerequisites:
 1. **Embedded corpus** — the bottom-up builder clusters on vectors and does not
    compute them, so the chunks must carry embeddings. The default
-   `src/echr/convention_chunks_with_embeddings.json` already has them (reused for
+   `corpora/ECHR/convention/chunks_with_embeddings.json` already has them (reused for
    every tree). The script checks this up front and aborts if a `--chunks` file
    is missing embeddings.
 2. **Start a vLLM server** — the script refuses to begin until `/health` responds

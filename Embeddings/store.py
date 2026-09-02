@@ -5,7 +5,7 @@ HOW TO USE: imported by eval_embedding_search.py — not run directly.
     hits = index.search(query_vec, k=10)   # -> list of {article_id, similarity, ...}
 
 The corpus is ~116 articles, so there's no need for a database: build_index.py
-caches each article's embedding into convention_chunks.json, and this module
+caches each article's embedding into the dataset's chunks.json, and this module
 loads those vectors into a NumPy matrix and does exact cosine top-k in memory.
 """
 from __future__ import annotations

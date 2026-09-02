@@ -617,7 +617,8 @@ class DistillationOutputStore:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     repo_root = repo_root_from_script()
-    default_tree_path = repo_root / "trees" / "EU" / "eu_conventions_notebook" / "eu_conventions_tree-bottom-up-llm.pkl"
+    default_tree_path = (repo_root / "corpora" / "EU" / "eu_conventions_notebook"
+                         / "trees" / "tree-bottom-up-llm.pkl")
     default_output_dir = repo_root / "src" / "llm_rl_playground" / "outputs" / "ecthr-distillation"
 
     parser = argparse.ArgumentParser(

@@ -1,11 +1,11 @@
-"""Build the index: embed convention_chunks.json and cache the vectors in it.
+"""Build the index: embed a dataset's chunks.json and cache the vectors in it.
 
 HOW TO USE (needs a vLLM embedding server running — see serve_and_index.sh):
     python Embeddings/build_index.py               # embed missing chunks + cache
     python Embeddings/build_index.py --overwrite   # recompute all embeddings
 Then evaluate with Embeddings/eval_embedding_search.py.
 
-Source: echr/convention_chunks.json — a list of chunks, each with
+Source: corpora/ECHR/convention/chunks.json — a list of chunks, each with
 `protocol`, `article_number`, `title`, `text`.
 
 Embeddings are cached back into that JSON under the `embeddings` key (with
@@ -73,9 +73,10 @@ def main() -> None:
     import config
 
     here = Path(__file__).resolve()
-    parser = argparse.ArgumentParser(description="Embed convention_chunks.json and cache vectors in it.")
+    parser = argparse.ArgumentParser(description="Embed a dataset chunks.json and cache vectors in it.")
     parser.add_argument("--model", default=None, help="Model slug from config.MODELS (default: ACTIVE_MODEL).")
-    parser.add_argument("--chunks", default=str(here.parent / "echr" / "convention_chunks.json"))
+    parser.add_argument("--chunks",
+                        default=str(here.parent / "corpora" / "ECHR" / "convention" / "chunks.json"))
     parser.add_argument("--overwrite", action="store_true", help="Recompute embeddings even if already cached.")
     args = parser.parse_args()
 

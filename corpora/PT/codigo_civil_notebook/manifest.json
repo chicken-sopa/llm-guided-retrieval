@@ -1,0 +1,69 @@
+{
+  "dataset": "PT",
+  "subset": "codigo_civil_notebook",
+  "note": "Portuguese Civil Code. NOTE: neither tree's leaf count matches this chunks file, so both were built with a --max-leaves cap or from a different corpus revision. Correspondence is assumed from repo layout, NOT verified.",
+  "generated": "2026-09-02",
+  "chunks": {
+    "path": "chunks.json",
+    "format": "wrapped",
+    "count": 157,
+    "md5": "cf552ae037c18b538aee5f655c471a91",
+    "fields": [
+      "article_number",
+      "article_title",
+      "book_number",
+      "book_title",
+      "chapter_number",
+      "chapter_title",
+      "chunk_id",
+      "chunk_type",
+      "citation",
+      "document_abbreviation",
+      "document_title",
+      "document_type",
+      "embedding",
+      "jurisdiction",
+      "language",
+      "page_end",
+      "page_start",
+      "paragraph_number",
+      "point_letter",
+      "section_number",
+      "section_title",
+      "source_id",
+      "source_path",
+      "subpoint_number",
+      "subsection_number",
+      "subsection_title",
+      "subtitle_number",
+      "subtitle_title",
+      "text",
+      "title_number",
+      "title_title"
+    ],
+    "id_field": null,
+    "text_field": null,
+    "embedding_field": null,
+    "embedded_copy": null
+  },
+  "trees": [
+    {
+      "path": "trees/tree-bottom-up-llm.pkl",
+      "tree_version": "bottom-up-llm",
+      "leaves": 64,
+      "depth": 5,
+      "size_bytes": 1405308,
+      "build": {},
+      "provenance": "UNVERIFIED: 64 leaves != 157 chunks"
+    },
+    {
+      "path": "trees/tree-bottom-up-sample.pkl",
+      "tree_version": "bottom-up-sample",
+      "leaves": 100,
+      "depth": 5,
+      "size_bytes": 2392342,
+      "build": {},
+      "provenance": "UNVERIFIED: 100 leaves != 157 chunks"
+    }
+  ]
+}

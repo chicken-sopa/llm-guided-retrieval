@@ -27,7 +27,7 @@ LATTICE proposes an *LLM-native retrieval* paradigm that combines the efficiency
    ```bash
    git clone https://github.com/nilesh2797/lattice
    cd lattice
-   mkdir results trees
+   mkdir results corpora
    ```
 
 2. **Install dependencies:**
@@ -36,8 +36,18 @@ LATTICE proposes an *LLM-native retrieval* paradigm that combines the efficiency
    ```
 
 3. **Download pre-built semantic trees:**
+
+   The published bundle is laid out as `<subset>/tree-<version>.pkl`. This repo stores each
+   corpus as `corpora/<DATASET>/<SUBSET>/`, with its trees under `trees/` inside it, so the
+   bundle needs a one-time reshuffle after cloning:
+
    ```bash
-   git clone https://huggingface.co/datasets/quicktensor/lattice-bright-trees ./trees/BRIGHT
+   git clone https://huggingface.co/datasets/quicktensor/lattice-bright-trees /tmp/lattice-bright-trees
+   for d in /tmp/lattice-bright-trees/*/; do
+     subset=$(basename "$d")
+     mkdir -p "corpora/BRIGHT/$subset/trees"
+     cp "$d"tree-*.pkl "corpora/BRIGHT/$subset/trees/"
+   done
    ```
 
 4. **Set up API credentials:**

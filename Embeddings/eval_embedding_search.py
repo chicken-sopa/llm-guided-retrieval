@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument("--eval-split", default="validation")
     parser.add_argument("--ecthr-config", default="alleged-violation-prediction")
     parser.add_argument("--output-dir", default=str(here.parent / "outputs"))
-    parser.add_argument("--chunks", default=None, help="Path to the embedded chunks json (default: Embeddings/echr/convention_chunks.json).")
+    parser.add_argument("--chunks", default=None, help="Path to the embedded chunks json (default: corpora/ECHR/convention/chunks.json).")
     parser.add_argument("--label", default=None)
     args = parser.parse_args()
 
@@ -76,7 +76,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    chunks_path = args.chunks or (here.parent / "echr" / "convention_chunks.json")
+    chunks_path = args.chunks or (here.parent / "corpora" / "ECHR" / "convention" / "chunks.json")
     index = VectorIndex.from_chunks_json(chunks_path, cfg.hf_name, normalize_article_label)
     print(f"Loaded in-memory index: {index.size} articles embedded with {cfg.hf_name}.")
 

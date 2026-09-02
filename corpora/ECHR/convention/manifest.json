@@ -1,0 +1,100 @@
+{
+  "dataset": "ECHR",
+  "subset": "convention",
+  "note": "ECHR Convention articles. Trees are the tree-depth ablation sweep: identical corpus, max_children swept 16->2, so depth is emergent.",
+  "generated": "2026-09-02",
+  "chunks": {
+    "path": "chunks.json",
+    "format": "list",
+    "count": 116,
+    "md5": "f27c449af36c340225b1a158f7adbfa1",
+    "fields": [
+      "article_number",
+      "id",
+      "protocol",
+      "text",
+      "title"
+    ],
+    "id_field": "id",
+    "text_field": "text",
+    "embedding_field": "embeddings",
+    "embedded_copy": "chunks_with_embeddings.json"
+  },
+  "trees": [
+    {
+      "path": "trees/tree-bottom-up-mc10.pkl",
+      "tree_version": "bottom-up-mc10",
+      "leaves": 116,
+      "depth": 4,
+      "size_bytes": 5494045,
+      "build": {
+        "max_children": 10,
+        "llm_api_backend": "vllm",
+        "text_field": "text",
+        "embedding_field": "embeddings",
+        "llm": null
+      },
+      "provenance": "verified: leaf count == chunk count"
+    },
+    {
+      "path": "trees/tree-bottom-up-mc16.pkl",
+      "tree_version": "bottom-up-mc16",
+      "leaves": 116,
+      "depth": 3,
+      "size_bytes": 5000875,
+      "build": {
+        "max_children": 16,
+        "llm_api_backend": "vllm",
+        "text_field": "text",
+        "embedding_field": "embeddings",
+        "llm": null
+      },
+      "provenance": "verified: leaf count == chunk count"
+    },
+    {
+      "path": "trees/tree-bottom-up-mc2.pkl",
+      "tree_version": "bottom-up-mc2",
+      "leaves": 116,
+      "depth": 17,
+      "size_bytes": 19025277,
+      "build": {
+        "max_children": 2,
+        "llm_api_backend": "vllm",
+        "text_field": "text",
+        "embedding_field": "embeddings",
+        "llm": null
+      },
+      "provenance": "verified: leaf count == chunk count"
+    },
+    {
+      "path": "trees/tree-bottom-up-mc3.pkl",
+      "tree_version": "bottom-up-mc3",
+      "leaves": 116,
+      "depth": 10,
+      "size_bytes": 11124730,
+      "build": {
+        "max_children": 3,
+        "llm_api_backend": "vllm",
+        "text_field": "text",
+        "embedding_field": "embeddings",
+        "llm": null
+      },
+      "provenance": "verified: leaf count == chunk count"
+    },
+    {
+      "path": "trees/tree-bottom-up-mc4.pkl",
+      "tree_version": "bottom-up-mc4",
+      "leaves": 116,
+      "depth": 7,
+      "size_bytes": 8216443,
+      "build": {
+        "max_children": 4,
+        "llm_api_backend": "vllm",
+        "text_field": "text",
+        "embedding_field": "embeddings",
+        "llm": null
+      },
+      "provenance": "verified: leaf count == chunk count"
+    }
+  ]
+}

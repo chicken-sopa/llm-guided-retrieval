@@ -51,7 +51,7 @@ else
     fi
 fi
 
-# 2. Build the index (embed chunks, cache into convention_chunks.json).
+# 2. Build the index (embed chunks, cache into the dataset chunks.json).
 echo "Building index..."
 python "$HERE/build_index.py" "$@"
 

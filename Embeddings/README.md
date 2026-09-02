@@ -8,15 +8,15 @@ so exact cosine top-k with NumPy is instant.
 |------|------|
 | `embed.py` | embedding client (vLLM `/v1/embeddings`); query vs document prefix |
 | `store.py` | in-memory vector index: load embedded chunks → NumPy cosine top-k |
-| `build_index.py` | embed `echr/convention_chunks.json` and cache the vectors in it |
+| `build_index.py` | embed `corpora/ECHR/convention/chunks.json` and cache the vectors in it |
 | `eval_embedding_search.py` | ECtHR top-k eval; reuses `ecthr_evaluation.py` scoring |
 | `config.py` | model registry (query/doc prefixes) |
 | `serve_and_index.sh` | start the vLLM embed server + build the index |
-| `echr/convention_chunks.json` | corpus (one chunk per article; cached embeddings live here) |
+| `corpora/ECHR/convention/chunks.json` | corpus (one chunk per article; cached embeddings live here) |
 
 ## How it works (no DB)
 
-`build_index.py` writes each article's embedding into `convention_chunks.json`
+`build_index.py` writes each article's embedding into `corpora/ECHR/convention/chunks.json`
 under the `embeddings` key — **that json is the index**. The eval loads it into a
 NumPy matrix and does cosine top-k in memory. The only running service is the
 vLLM embedding server (used to embed documents at build time and queries at eval

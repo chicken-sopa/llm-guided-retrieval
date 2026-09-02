@@ -44,7 +44,7 @@ CLI use
         --queries_file my_queries.txt --output results.json
 
     # Point at an arbitrary tree pickle, and define what "relevant" means for it:
-    python src/lattice.py --tree_path trees/MyCorpus/tree.pkl \
+    python src/lattice.py --tree_path corpora/MyCorpus/main/trees/tree-bottom-up-llm.pkl \
         --subset mycorpus --tree_version custom \
         --relevance_definition "A document is relevant if it answers the question." \
         --query "..."
@@ -79,10 +79,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def load_semantic_tree(hp: HyperParams, tree_path: str | None = None):
     """Load a semantic tree and its node registry.
 
-    `tree_path` overrides the default `trees/{DATASET}/{SUBSET}/tree-{TREE_VERSION}.pkl`.
+    `tree_path` overrides the default
+    `corpora/{DATASET}/{SUBSET}/trees/tree-{TREE_VERSION}.pkl`.
     """
     if tree_path is None:
-        tree_path = f"{BASE_DIR}/trees/{hp.DATASET}/{hp.SUBSET}/tree-{hp.TREE_VERSION}.pkl"
+        tree_path = f"{BASE_DIR}/corpora/{hp.DATASET}/{hp.SUBSET}/trees/tree-{hp.TREE_VERSION}.pkl"
     tree_dict = pkl.load(open(tree_path, "rb"))
     root = SemanticNode().load_dict(tree_dict) if isinstance(tree_dict, dict) else tree_dict
     node_registry = compute_node_registry(root)
