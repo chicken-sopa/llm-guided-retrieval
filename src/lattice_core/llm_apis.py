@@ -406,7 +406,13 @@ class LanguageModelAPI(ABC):
 
         # Set up logging
         self.logger = logger or logging.getLogger(self.__class__.__name__)
-        if not self.logger.handlers:
+        # `hasHandlers()`, NOT `self.logger.handlers`: the latter only sees handlers attached
+        # to this logger itself, so a HOST application's logger -- which normally carries no
+        # handlers of its own and propagates to a configured root -- looked unconfigured. We
+        # then attached a second handler to it and every one of the host's log lines printed
+        # twice, in our format as well as theirs. Only self-configure when the logger would
+        # otherwise be silent, which is the standalone-CLI case this is here for.
+        if not self.logger.hasHandlers():
             # Configure a default handler if none exists to ensure logs are visible.
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

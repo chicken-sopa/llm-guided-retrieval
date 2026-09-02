@@ -134,17 +134,25 @@ def build_llm_api_and_kwargs(hp: HyperParams, logger):
 
 
 def override_relevance_definition(definition: str) -> None:
-    """Make the traversal prompt use a custom notion of "relevant" for any tree.
+    """DEPRECATED -- pass `relevance_definition=` to `from_hp` instead.
 
-    `get_traversal_prompt` looks up `get_relevance_definition(hp.SUBSET)` and, for an
-    unknown subset, silently falls back to the `stackexchange` definition. When you run
-    LATTICE on your own corpus this is usually the wrong text, so we patch the lookup to
-    return your definition regardless of subset. Leaves run.py / ECtHR behavior untouched
-    since they never call this.
+    This rebinds a MODULE-LEVEL lookup, so it is process-wide: build two retrievers over
+    two corpora (an authority tier and a caselaw tier, say) and the second call silently
+    replaces the first one's definition for both. `from_hp` now stamps the definition onto
+    a private copy of the HyperParams, which is per-retriever and concurrency-safe.
+
+    Kept only because it is exported in `__all__`.
     """
+    import warnings
     from . import prompts
 
-    prompts.get_relevance_definition = lambda subset: definition
+    warnings.warn(
+        "override_relevance_definition patches a module-level lookup and so applies to EVERY "
+        "retriever in this process; pass relevance_definition= to LatticeRetriever.from_hp instead.",
+        DeprecationWarning, stacklevel=2,
+    )
+    # `*args, **kwargs` because get_relevance_definition also takes a logger now.
+    prompts.get_relevance_definition = lambda subset, *args, **kwargs: definition
 #endregion
 
 
@@ -170,10 +178,25 @@ class LatticeRetriever:
     @classmethod
     def from_hp(cls, hp: HyperParams, logger=None, tree_path: str | None = None,
                 relevance_definition: str | None = None,
-                show_error_logs: bool = False) -> "LatticeRetriever":
+                show_error_logs: bool | None = None) -> "LatticeRetriever":
+        """Build a retriever over one tree.
+
+        `relevance_definition` says what "relevant" MEANS for this corpus and is stamped
+        onto a COPY of `hp`, so two retrievers built in one process keep their own.
+        `show_error_logs` defaults to `hp.SHOW_ERROR_LOGS`; passing it explicitly wins and
+        is written back to that copy, so the retriever and the InferSamples it builds
+        cannot disagree about whether dropped beams are reported.
+        """
         logger = logger or _default_logger()
+        # Copy first: `hp` belongs to the caller, and stamping the original would leak this
+        # retriever's settings into any other one built from the same HyperParams.
+        hp = HyperParams(**vars(hp))
         if relevance_definition:
-            override_relevance_definition(relevance_definition)
+            hp.add_param('relevance_definition', relevance_definition)
+        if show_error_logs is None:
+            show_error_logs = bool(hp.SHOW_ERROR_LOGS)
+        else:
+            hp.add_param('show_error_logs', bool(show_error_logs))
         root, node_registry = load_semantic_tree(hp, tree_path=tree_path)
         llm_api, llm_api_kwargs = build_llm_api_and_kwargs(hp, logger)
         return cls(root, node_registry, hp, logger, llm_api, llm_api_kwargs,

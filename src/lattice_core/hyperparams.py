@@ -54,6 +54,12 @@ class HyperParams(argparse.Namespace):
         'local_adapter_path',
         'local_use_4bit',
         'local_serialize_requests',
+        # Neither of these changes what a run PRODUCES, and `__str__` builds the result
+        # filenames in save_exp/load_exp -- so leaving them in would rename every existing
+        # dump (breaking --load_existing), and a multi-sentence relevance definition would
+        # land verbatim in a filename.
+        'relevance_definition',
+        'show_error_logs',
     ])
 
     def __init__(self, **kwargs):
@@ -66,8 +72,12 @@ class HyperParams(argparse.Namespace):
         return self.__str__()
 
     def __getattr__(self, k):
+        # CAREFUL: this returns None for an unset param instead of raising AttributeError,
+        # so `getattr(hp, 'ANYTHING', some_default)` NEVER yields `some_default` -- the
+        # attribute always "exists". Test an optional param with `is None`, not with a
+        # getattr default. (This masked --show_error_logs for the whole of its life.)
         return vars(self).get(k.lower())
-    
+
     @classmethod
     def from_args(cls, args=None):
         """Parse command line arguments and return HyperParams instance"""
@@ -102,7 +112,16 @@ class HyperParams(argparse.Namespace):
         parser.add_argument('--load_existing', default=False, action='store_true') 
         parser.add_argument('--num_threads', type=int, default=os.cpu_count())
         parser.add_argument('--suffix', type=str, default='')
-        
+        parser.add_argument('--show_error_logs', default=False, action=argparse.BooleanOptionalAction,
+                            help='Log when a traversal response is repaired, falls back to a '
+                                 'non-promoting score, or is dropped from the beam. Off by default '
+                                 'because it is noisy on local/vLLM backends; on is what you want '
+                                 'when a run returns weak results and you need to know why.')
+        # `relevance_definition` is deliberately NOT a parser argument: from_args() splits its
+        # input on whitespace, so a multi-sentence definition could not survive the round trip.
+        # Set it with LatticeRetriever.from_hp(relevance_definition=...), which stamps it on a
+        # COPY of the HyperParams via add_param below.
+
         # Parse arguments
         parsed_args = parser.parse_args(args.split() if args else None)
         

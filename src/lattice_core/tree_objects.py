@@ -241,7 +241,10 @@ class InferSample(object):
     self.search_with_path_relevance = hp.SEARCH_WITH_PATH_RELEVANCE
     self.num_leaf_calib = hp.NUM_LEAF_CALIB
     self.logger = logger
-    self.show_error_logs = bool(getattr(hp, 'SHOW_ERROR_LOGS', True))
+    # NOT `getattr(hp, 'SHOW_ERROR_LOGS', True)`: HyperParams.__getattr__ returns None for
+    # an unset param rather than raising, so that default could never fire and this was
+    # pinned to False no matter what the caller asked for.
+    self.show_error_logs = bool(hp.SHOW_ERROR_LOGS)
 
     self.get_traversal_prompt = partial(get_traversal_prompt, hp=hp, logger=logger, return_constraint=False)
     self.get_reranking_prompt = partial(get_reranking_prompt, hp=hp, logger=logger)

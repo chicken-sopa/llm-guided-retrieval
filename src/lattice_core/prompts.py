@@ -109,7 +109,18 @@ def get_content_proto_size(text):
 def get_desc_str_from_list(desc_list, max_char_len=None):
   return ''.join(["[{}]. {}\n\n".format(i, re.sub('\n+', ' ', doc[:max_char_len])) for i, doc in enumerate(desc_list)])
 
-def get_relevance_definition(subset):
+# Subsets we have already warned about, so an unknown subset costs ONE line per process
+# rather than one per beam per traversal step.
+_WARNED_UNKNOWN_SUBSETS = set()
+
+def get_relevance_definition(subset, logger=None):
+    """The definition of "relevant" for `subset`, injected into the traversal prompt.
+
+    An unknown subset falls back to the `stackexchange` definition, which is almost never
+    the right text for a corpus of your own -- so pass `logger` to hear about it once.
+    Prefer setting `hp.relevance_definition` (see `LatticeRetriever.from_hp`), which skips
+    this lookup entirely and is per-retriever rather than per-process.
+    """
     subset = subset.lower()
     RELEVANCE_DEFINITIONS = {
         'leetcode': '''The relevance between queries and positive documents is defined by whether the coding problem (i.e., query) involves the same algorithm and/or data structure. The queries and documents are problems and solutions from LeetCode. The problem descriptions are used as queries Q, and the positive documents D+Q are solved problems (with solutions) that were annotated as similar problems by LeetCode.''',
@@ -123,8 +134,18 @@ def get_relevance_definition(subset):
     }
     RELEVANCE_DEFINITIONS['aops'] = RELEVANCE_DEFINITIONS['theoremqa_questions']
     RELEVANCE_DEFINITIONS['theoremqa_theorems'] = RELEVANCE_DEFINITIONS['theoremqa_questions']
-    RELEVANCE_DEFINITION = RELEVANCE_DEFINITIONS[subset] if subset in RELEVANCE_DEFINITIONS else RELEVANCE_DEFINITIONS['stackexchange']
-    return RELEVANCE_DEFINITION
+    if subset in RELEVANCE_DEFINITIONS:
+        return RELEVANCE_DEFINITIONS[subset]
+
+    if (logger is not None) and (subset not in _WARNED_UNKNOWN_SUBSETS):
+        _WARNED_UNKNOWN_SUBSETS.add(subset)
+        logger.warning(
+            'No relevance definition for subset %r; falling back to the `stackexchange` one, '
+            'which describes a Q&A corpus and is probably wrong for yours. Pass '
+            'relevance_definition= to LatticeRetriever.from_hp to say what "relevant" means here.',
+            subset,
+        )
+    return RELEVANCE_DEFINITIONS['stackexchange']
 
 def get_traversal_prompt_response_constraint(require_reasoning=True, return_dict=True):
     if not return_dict:
@@ -187,7 +208,11 @@ def get_traversal_prompt_response_constraint(require_reasoning=True, return_dict
 def get_traversal_prompt(query, child_desc_list, hp, logger, return_constraint=True, **kwargs):
   max_desc_char_len = None
   constraint = get_traversal_prompt_response_constraint() if return_constraint else None
-  relevance_definition = get_relevance_definition(hp.SUBSET)
+  # A definition carried on `hp` WINS over the per-subset table. It belongs to this one
+  # retriever, so two retrievers over different corpora in the same process (e.g. an
+  # authority tier and a caselaw tier) each keep their own notion of "relevant" -- which
+  # patching the module-level lookup could not do.
+  relevance_definition = hp.RELEVANCE_DEFINITION or get_relevance_definition(hp.SUBSET, logger=logger)
 
   while True:
     args = {
