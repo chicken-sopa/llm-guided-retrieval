@@ -156,7 +156,7 @@ def build_run_spec(args: argparse.Namespace) -> TeacherRunSpec:
 
 def load_semantic_tree(tree_path: Path):
     """Load the semantic tree in the object form expected by InferSample and the evaluator."""
-    from tree_objects import SemanticNode
+    from lattice_core.tree_objects import SemanticNode
 
     if tree_path.suffix == ".pkl":
         tree_obj = pickle.loads(tree_path.read_bytes())
@@ -167,7 +167,7 @@ def load_semantic_tree(tree_path: Path):
 
 def make_hyperparams(args: argparse.Namespace, tree_path: Path, run: TeacherRunSpec):
     """Configure HyperParams for an ECtHR traversal run with the chosen teacher backend."""
-    from hyperparams import HyperParams
+    from lattice_core.hyperparams import HyperParams
 
     default_concurrency = 1 if run.backend == "localModel" else 8
     hp = HyperParams.from_args("--subset fiqa --tree_version eu_conventions_notebook")
@@ -197,7 +197,7 @@ def make_llm_api_kwargs(args: argparse.Namespace, backend: str) -> dict[str, Any
     Guided/structured JSON decoding is kept on for the backends that support it so the teacher
     labels are clean. vLLM guided decoding (``guided_json``) is opt-out via ``--no-vllm-guided-json``.
     """
-    from prompts import get_traversal_prompt_response_constraint
+    from lattice_core.prompts import get_traversal_prompt_response_constraint
 
     default_concurrency = 1 if backend == "localModel" else 8
     schema = get_traversal_prompt_response_constraint(bool(args.reasoning_in_traversal_prompt))
@@ -232,7 +232,7 @@ def make_llm_api_kwargs(args: argparse.Namespace, backend: str) -> dict[str, Any
 
 def make_teacher_api(args: argparse.Namespace, run: TeacherRunSpec, logger):
     """Instantiate the teacher LLM API for the chosen backend."""
-    from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
+    from lattice_core.llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
 
     if run.backend == "genai":
         return GenAIAPI(run.model_id, logger=logger, timeout=args.timeout, max_retries=args.max_retries)
@@ -309,7 +309,7 @@ async def run_lattice_with_trace_async(
     as the already-built container of (tree, registry, hp, logger, teacher `llm_api`, `llm_api_kwargs`);
     no ECtHR-specific behavior is invoked here.
     """
-    from lattice import TracingLatticeRetriever
+    from lattice_core.lattice import TracingLatticeRetriever
 
     retriever = TracingLatticeRetriever(
         evaluator.semantic_root_node,
@@ -700,7 +700,7 @@ def main() -> None:
         summarize_ecthr_cases,
     )
     from tree_construction.build_llm_bottom_up_tree import run_coro_sync
-    from utils import compute_node_registry, setup_logger
+    from lattice_core.utils import compute_node_registry, setup_logger
 
     run = build_run_spec(args)
 

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lattice-core"
+version = "0.1.0"
+description = "LATTICE: LLM-guided retrieval by traversing a semantic tree."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+# Only what the RETRIEVAL engine imports. The evaluation, tree-building and
+# distillation stacks (datasets, transformers, peft, trl, wandb, vllm, plotly,
+# matplotlib, pandas) stay in src/requirements.txt -- installing this package
+# into another project must not drag the thesis harness along.
+#
+# torch is not optional: CalibModel.fit (calib_utils.py) optimizes a
+# Plackett-Luce calibration with AdamW on the default retrieval path, and its
+# output feeds node.calibrated_relevance. It runs on CPU.
+dependencies = [
+    "numpy>=1.26",
+    "openai>=1.40",
+    "google-genai>=1.33",
+    "json_repair>=0.46",
+    "jsonschema>=4.25",
+    "scikit-learn>=1.5",
+    "torch>=2.0",
+    "tqdm>=4.66",
+]
+
+[project.urls]
+Repository = "https://github.com/chicken-sopa/llm-guided-retrieval"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lattice_core*"]

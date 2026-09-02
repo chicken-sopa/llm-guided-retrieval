@@ -20,7 +20,7 @@ from google.genai.types import GenerateContentConfig
 from json_repair import repair_json
 from openai import AsyncOpenAI
 
-from utils import validate_genai_response_constraint
+from .utils import validate_genai_response_constraint
 
 
 async def _run_and_return_index(index, coro):

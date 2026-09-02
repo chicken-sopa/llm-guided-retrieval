@@ -48,8 +48,8 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
-from utils import setup_logger
+from lattice_core.llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
+from lattice_core.utils import setup_logger
 
 SUMMARY_RESPONSE_SCHEMA = {
     "type": "object",

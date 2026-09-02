@@ -309,7 +309,7 @@ Candidate articles from LATTICE:
 
 
 def parse_selector_response(output: str, allowed_articles: set[str]) -> dict:
-    from utils import post_process
+    from lattice_core.utils import post_process
 
     try:
         parsed = post_process(output, return_json=True)
@@ -392,7 +392,7 @@ class EcthrTraversalEvaluator:
     show_error_logs: bool = False
 
     def make_sample(self, query: str) -> InferSample:
-        from tree_objects import InferSample
+        from lattice_core.tree_objects import InferSample
 
         return InferSample(
             self.semantic_root_node,
@@ -420,7 +420,7 @@ class EcthrTraversalEvaluator:
         is passed through so the retriever's batch calls match this evaluator's. (The parse helpers
         below are kept for external/notebook callers but are no longer used by the traversal path.)
         """
-        from lattice import LatticeRetriever
+        from lattice_core.lattice import LatticeRetriever
 
         retriever = getattr(self, "_lattice_retriever_cache", None)
         if retriever is None:
@@ -445,7 +445,7 @@ class EcthrTraversalEvaluator:
         prompt_index: int | None = None,
     ) -> dict | None:
         """Repair a traversal response if possible; return None if it is still unusable."""
-        from utils import post_process
+        from lattice_core.utils import post_process
 
         parsed = post_process(output, return_json=True, show_error_logs=self.show_error_logs)
         if isinstance(parsed, dict):

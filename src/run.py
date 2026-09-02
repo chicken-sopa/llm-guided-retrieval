@@ -9,13 +9,13 @@ import logging
 from typing import List
 from datasets import load_dataset
 from google.genai import types
-from hyperparams import HyperParams
-from tree_objects import SemanticNode, InferSample
-from llm_apis import GenAIAPI, LocalModelAPI, VllmAPI
-from llm_apis import OpenAIResponsesAPI
-from lattice import LatticeRetriever
-from prompts import get_traversal_prompt_response_constraint, get_reranking_prompt
-from utils import (
+from lattice_core.hyperparams import HyperParams
+from lattice_core.tree_objects import SemanticNode, InferSample
+from lattice_core.llm_apis import GenAIAPI, LocalModelAPI, VllmAPI
+from lattice_core.llm_apis import OpenAIResponsesAPI
+from lattice_core.lattice import LatticeRetriever
+from lattice_core.prompts import get_traversal_prompt_response_constraint, get_reranking_prompt
+from lattice_core.utils import (
     setup_logger, 
     compute_node_registry,
     get_all_leaf_nodes_with_path, 

@@ -115,7 +115,7 @@ def save_exp(RESULTS_DIR, hp, llm_api, eval_samples, all_eval_metric_dfs, allow_
 def load_exp(RESULTS_DIR, hp, semantic_root_node, node_registry, logger, hp_str=None):
   if hp_str is None:
     hp_str = str(hp)
-  from tree_objects import InferSample
+  from .tree_objects import InferSample
   eval_dump_path = f'{RESULTS_DIR}/all_eval_sample_dicts-{hp_str}.pkl'
   eval_metrics_dump_path = f'{RESULTS_DIR}/all_eval_metrics-{hp_str}.pkl'
 

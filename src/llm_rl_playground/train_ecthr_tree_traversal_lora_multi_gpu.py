@@ -437,7 +437,7 @@ def resolve_compute_dtype() -> torch.dtype:
 
 
 def load_eval_semantic_tree(eval_tree_path: Path):
-    from tree_objects import SemanticNode
+    from lattice_core.tree_objects import SemanticNode
 
     if eval_tree_path.suffix == ".pkl":
         tree_obj = pickle.loads(eval_tree_path.read_bytes())
@@ -454,16 +454,16 @@ def run_post_training_ecthr_batched_eval(args: argparse.Namespace, output_dir: P
 
     import pandas as pd
 
-    from hyperparams import HyperParams
-    from llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
+    from lattice_core.hyperparams import HyperParams
+    from lattice_core.llm_apis import GenAIAPI, LocalModelAPI, OpenAIResponsesAPI, VllmAPI
     from llm_rl_playground.ecthr_evaluation import (
         EcthrTraversalEvaluator,
         get_label_names,
         load_ecthr_dataset,
         summarize_ecthr_cases,
     )
-    from prompts import get_traversal_prompt_response_constraint
-    from utils import compute_node_registry, setup_logger
+    from lattice_core.prompts import get_traversal_prompt_response_constraint
+    from lattice_core.utils import compute_node_registry, setup_logger
 
     default_eval_tree_path = (repo_root / "corpora" / "EU" / "eu_conventions_notebook"
                               / "trees" / "tree-bottom-up-llm.pkl")

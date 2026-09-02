@@ -1,9 +1,9 @@
 import numpy as np
 from functools import partial
 from json_repair import repair_json
-from prompts import get_traversal_prompt, get_reranking_prompt
-from utils import compute_ndcg, compute_recall, recursive_key_search, chain_path_rel_fn
-from calib_utils import CalibModel, get_bimodal_gmm_intrsxn
+from .prompts import get_traversal_prompt, get_reranking_prompt
+from .utils import compute_ndcg, compute_recall, recursive_key_search, chain_path_rel_fn
+from .calib_utils import CalibModel, get_bimodal_gmm_intrsxn
 
 class SemanticNode:
     desc: str = ''

@@ -167,29 +167,78 @@ cd scripts
 
 For a complete list, see [`src/hyperparams.py`](src/hyperparams.py).
 
+### Using LATTICE from another project
+
+The retrieval engine is the installable package `lattice_core`; everything else in
+this repo (evaluation, tree building, distillation) sits outside it, so installing
+does not pull the research harness along.
+
+```bash
+pip install -e /path/to/llm-guided-retrieval        # or add it as a git submodule
+```
+
+```python
+from lattice_core import HyperParams, LatticeRetriever
+
+hp = HyperParams.from_args("--dataset ECHR --subset convention "
+                          "--tree_version bottom-up-mc10 "
+                          "--llm_api_backend openai --llm gpt-4.1")
+retriever = LatticeRetriever.from_hp(hp, tree_path="/abs/path/to/tree.pkl")
+
+for hit in retriever.retrieve("Does Article 8 cover phone tapping?", top_k=10):
+    print(hit["rank"], round(hit["score"], 3), hit["node_id"], hit["text"][:100])
+```
+
+Three things to know when embedding it:
+
+- **From async code, await `retrieve_async` / `retrieve_many_async`.** The sync
+  `retrieve` wrappers give every call its own event loop, which an async host does
+  not want.
+- **Always pass an explicit string to `HyperParams.from_args`.** With no argument it
+  parses `sys.argv`, which inside another application means the host's flags.
+- **Pass `tree_path=`** unless the corpus lives in this repo's `corpora/` folder; the
+  default path is resolved relative to the repo root. Use
+  `relevance_definition="..."` to tell the traversal prompt what "relevant" means for
+  your corpus, otherwise it falls back to the StackExchange definition.
+
 ### Project Structure
 
 ```
 lattice/release/
+├── build_tree.py           # Build a tree for a corpus + update its manifest
+├── pyproject.toml          # Packaging for `lattice_core` (retrieval deps only)
 ├── src/
-│   ├── run.py              # Main execution script
+│   ├── run.py              # Main execution script (BRIGHT evaluation)
 │   ├── run.sh              # Batch execution wrapper
 |   ├── run.ipynb           # Jupyter notebook for running / debugging experiments
-│   ├── hyperparams.py      # Hyperparameter definitions
-│   ├── tree_objects.py     # Semantic tree and sample objects
-│   ├── llm_apis.py         # LLM API wrappers (GenAI and vLLM)
-│   ├── prompts.py          # Prompt templates
-│   ├── utils.py            # Utility functions
-│   └── calib_utils.py      # Calibration utilities
+│   └── lattice_core/       # THE INSTALLABLE RETRIEVAL ENGINE
+│       ├── lattice.py      # LatticeRetriever: the traversal loop
+│       ├── hyperparams.py  # Hyperparameter definitions
+│       ├── tree_objects.py # Semantic tree and sample objects
+│       ├── llm_apis.py     # LLM API wrappers (GenAI, OpenAI, vLLM, local)
+│       ├── prompts.py      # Prompt templates
+│       ├── utils.py        # Utility functions
+│       └── calib_utils.py  # Calibration utilities
 ├── scripts/
 │   ├── start_vllm_cluster.sh   # Start vLLM servers (data/tensor parallel)
 │   ├── stop_vllm_cluster.sh    # Stop vLLM servers
 │   └── check_vllm_cluster.sh   # Check vLLM server status
-├── trees/
-│   └── BRIGHT/             # Pre-built semantic trees
+├── corpora/                # One self-contained folder per corpus
+│   └── <DATASET>/<SUBSET>/
+│       ├── chunks.json     # The corpus (source of truth)
+│       ├── manifest.json   # Chunk stats + per-tree provenance and build args
+│       └── trees/          # tree-<version>.pkl, what the retriever loads
 ├── results/
 │   └── BRIGHT/             # Experiment results
 └── logs/                   # Execution logs (including vLLM server logs)
+```
+
+Add a corpus (here or in any project that installed the package):
+
+```bash
+mkdir -p corpora/MyCorpus/main && cp my_chunks.json corpora/MyCorpus/main/chunks.json
+python build_tree.py --dataset MyCorpus --subset main --max-children 10
+python build_tree.py --list        # every corpus, its trees, leaves and depth
 ```
 
 ## Results

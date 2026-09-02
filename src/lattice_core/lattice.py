@@ -16,8 +16,7 @@ beam drop) so flaky local/vLLM output can't poison a beam.
 --------------------------------------------------------------------------------
 Library use
 --------------------------------------------------------------------------------
-    from hyperparams import HyperParams
-    from lattice import LatticeRetriever
+    from lattice_core import HyperParams, LatticeRetriever
 
     hp = HyperParams.from_args("--subset biology --tree_version bottom-up "
                                "--llm_api_backend openai --llm gpt-4.1")
@@ -63,15 +62,16 @@ from typing import Any
 
 import numpy as np
 
-from hyperparams import HyperParams
-from tree_objects import SemanticNode, InferSample
-from llm_apis import GenAIAPI, LocalModelAPI, VllmAPI, OpenAIResponsesAPI
-from prompts import get_traversal_prompt_response_constraint
-from utils import setup_logger, compute_node_registry, post_process
-from tree_construction.build_llm_bottom_up_tree import run_coro_sync
+from ._async import run_coro_sync
+from .hyperparams import HyperParams
+from .tree_objects import SemanticNode, InferSample
+from .llm_apis import GenAIAPI, LocalModelAPI, VllmAPI, OpenAIResponsesAPI
+from .prompts import get_traversal_prompt_response_constraint
+from .utils import setup_logger, compute_node_registry, post_process
 
 np.random.seed(42)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# .../src/lattice_core/lattice.py -> repo root is three levels up.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #endregion
 
 
@@ -142,7 +142,7 @@ def override_relevance_definition(definition: str) -> None:
     return your definition regardless of subset. Leaves run.py / ECtHR behavior untouched
     since they never call this.
     """
-    import prompts
+    from . import prompts
 
     prompts.get_relevance_definition = lambda subset: definition
 #endregion
