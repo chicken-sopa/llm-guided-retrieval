@@ -1,18 +1,18 @@
 import json
-import wandb
 import os
 import pickle as pkl
-import pandas as pd
 from json_repair import repair_json
 import numpy as np
-import plotly.express as px
-import plotly.graph_objs as go
 import textwrap
-from IPython.display import display, HTML
 from urllib.parse import quote
 import logging
 from jsonschema import validate, ValidationError
 from google import genai
+
+# wandb / pandas / plotly / IPython are imported INSIDE the functions that need them.
+# They belong to experiment logging, checkpointing and visualization -- none of which the
+# retrieval path touches -- and importing them here would force every consumer of
+# `lattice_core` to install the whole research stack just to run a search.
 
 PICKLE_ALLOWED_CLASSES = [bool, int, float, complex, str, bytes, bytearray, list, tuple, dict, set, frozenset, np.ndarray]
 
@@ -86,6 +86,7 @@ def get_node_id(id, docs_df):
 
 #region Saving and loading results helper functions
 def save_exp(RESULTS_DIR, hp, llm_api, eval_samples, all_eval_metric_dfs, allow_overwrite=False, save_llm_api_history=False):
+  import pandas as pd
   def sanitize_dict(d):
     if isinstance(d, dict):
       return {k: sanitize_dict(v) for k, v in d.items() if any([isinstance(v, allowed) for allowed in PICKLE_ALLOWED_CLASSES])}
@@ -113,6 +114,7 @@ def save_exp(RESULTS_DIR, hp, llm_api, eval_samples, all_eval_metric_dfs, allow_
     pkl.dump(llm_api.history, open(llm_api_history_dump_path, 'wb'))
 
 def load_exp(RESULTS_DIR, hp, semantic_root_node, node_registry, logger, hp_str=None):
+  import pandas as pd
   if hp_str is None:
     hp_str = str(hp)
   from .tree_objects import InferSample
@@ -171,6 +173,7 @@ def setup_logger(name, log_file_name, level=logging.INFO):
 
 def init_wandb_logging(hp, results_dir, mode_override=None):
     """Initialize wandb logging with project configuration."""
+    import wandb
     wandb.init(
         project="lattice-retrieval",
         name=f"{hp.SUBSET}_{hp.LLM}_{hp.TREE_VERSION}_{hp.SUFFIX}",
@@ -182,6 +185,7 @@ def init_wandb_logging(hp, results_dir, mode_override=None):
 
 def wandb_log_iteration_metrics(eval_metric_df, iteration):
     """Log metrics for a single iteration with proper step tracking."""
+    import wandb
     # Log mean metrics for this iteration with iteration as the step
     metrics_dict = {}
     for k in eval_metric_df.columns:
@@ -192,6 +196,7 @@ def wandb_log_iteration_metrics(eval_metric_df, iteration):
 
 def wandb_log_reranking_metrics(rerank_eval_metric_df, step=None):
     """Log reranking evaluation metrics as a table."""
+    import wandb
     # Create table data with metric names and their mean values
     table_data = []
     for k in rerank_eval_metric_df.columns:
@@ -243,6 +248,7 @@ def wandb_log_final_summary(all_eval_samples, final_step=None):
 
 def finish_wandb_logging(logger):
     """Finish wandb run and log completion."""
+    import wandb
     wandb.finish()
     logger.info("Wandb run finished")
 #endregion
@@ -423,6 +429,10 @@ def visualize_sample(sample, width=1400, height=1000, save_path=None, max_step=1
     """
     Creates an interactive Plotly visualization with query text and highlighted gold paths.
     """
+    import plotly.express as px
+    import plotly.graph_objs as go
+    from IPython.display import display, HTML
+
     root_node = sample.prediction_tree
     gold_paths = sample.gold_paths
     excluded_ids_set = sample.excluded_ids_set

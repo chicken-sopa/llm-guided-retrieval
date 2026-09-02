@@ -2,10 +2,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
 
 def get_bimodal_gmm_intrsxn(theta, plot=False):
+    # Imported here, not at module level: plotting is a debugging aid for the
+    # calibration fit, and a consumer of the retriever should not have to
+    # install matplotlib to run a search.
+    if plot:
+        import matplotlib.pyplot as plt
+
     if len(theta) < 2:
         return float(theta[0]) if len(theta) else 0.0
     gmm = GaussianMixture(n_components=2)
