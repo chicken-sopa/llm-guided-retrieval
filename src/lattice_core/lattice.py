@@ -84,7 +84,10 @@ def load_semantic_tree(hp: HyperParams, tree_path: str | None = None):
     """
     if tree_path is None:
         tree_path = f"{BASE_DIR}/corpora/{hp.DATASET}/{hp.SUBSET}/trees/tree-{hp.TREE_VERSION}.pkl"
-    tree_dict = pkl.load(open(tree_path, "rb"))
+    # `with`, not a bare open(): a host that builds several retrievers (one per corpus tier) leaks
+    # a file handle per tree otherwise, and CPython only closes it whenever the reader is collected.
+    with open(tree_path, "rb") as fh:
+        tree_dict = pkl.load(fh)
     root = SemanticNode().load_dict(tree_dict) if isinstance(tree_dict, dict) else tree_dict
     node_registry = compute_node_registry(root)
     return root, node_registry

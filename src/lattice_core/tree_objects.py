@@ -306,12 +306,41 @@ class InferSample(object):
     prompt, constraint = self.get_reranking_prompt(self.query, doc_list, topk=min(self.max_rerank_size, len(doc_list)))
     return prompt, constraint
 
+  def _valid_ranking(self, ranking, num_candidates):
+    """Coerce a model-supplied ranking to in-range integer indices.
+
+    The indices come straight from an LLM, so an out-of-range or non-integer entry is a
+    crash (IndexError / TypeError) rather than a bad result. Mirrors the tolerance
+    `process_beam_response_jsons` already applies to relevance-score ids. Filtering
+    up-front rather than skipping mid-loop keeps the ranks contiguous, so the 1/log2(rank+2)
+    discount is not left with holes in it.
+    """
+    valid = []
+    for entry in (ranking or []):
+      try:
+        index = int(entry)
+      except (TypeError, ValueError):
+        continue
+      if 0 <= index < num_candidates:
+        valid.append(index)
+    dropped = len(ranking or []) - len(valid)
+    if dropped and self.show_error_logs:
+      self.logger.warning('Ignoring %d rerank index/indices outside 0..%d: %s',
+                          dropped, num_candidates - 1, ranking)
+    return valid
+
   def process_rerank_step_response(self, rerank_step_response):
     response_json = repair_json(rerank_step_response, return_objects=True)
-    reasoning = response_json['reasoning']
-    ranking = response_json['ranking']
+    # `get_reasoned_ranking_genai_schema` names this field `_reasoning` while the prompt text
+    # asks for `reasoning`, so which one comes back depends on whether the backend enforced
+    # the schema. Search for either rather than KeyError on the one we did not get.
+    reasoning = recursive_key_search(response_json, 'reasoning')
+    if reasoning is None:
+      reasoning = recursive_key_search(response_json, '_reasoning') or ''
+    ranking = recursive_key_search(response_json, 'ranking')
     flat_index_to_nested_index = [(i, j) for i, path in enumerate(self.beam_state_paths) for j, x in enumerate(path[-1].child_desc)]
     nested_relevances = [[0 for _ in range(path[-1].num_children)] for path in self.beam_state_paths]
+    ranking = self._valid_ranking(ranking, len(flat_index_to_nested_index))
     for rank, ind in enumerate(ranking):
       i, j = flat_index_to_nested_index[ind]
       nested_relevances[i][j] = 1/np.log2(rank+2)
@@ -319,7 +348,12 @@ class InferSample(object):
       if path[-1].child:
         for c in path[-1].child:
           c.local_relevance = nested_relevances[i][c.path[-1]]
-          c.path_relevance = chain_path_rel_fn(c.local_relevance, c.parent.path_relevance)
+          # The third argument is REQUIRED; omitting it raised TypeError on every call, which
+          # is why this branch has never run (nothing in the repo drives these rerank methods
+          # -- run.py's --rerank is a separate inline implementation). Use the node's own
+          # factor, matching how PredictionNode.__init__ computes path_relevance.
+          c.path_relevance = chain_path_rel_fn(c.local_relevance, c.parent.path_relevance,
+                                               c.relevance_chain_factor)
       else:
         path[-1].instantiate_children(nested_relevances[i], reasoning, creation_step=self.num_iters+1)
 
@@ -563,11 +597,16 @@ class InferSample(object):
     rel_fn = rel_fn or self.get_rel_fn()
     all_expandable_paths = self.get_all_expandable_paths(self.prediction_tree)
     topk_expandable_paths = sorted(all_expandable_paths, key=rel_fn, reverse=True)[:self.max_rerank_size]
-    prompt, constraint = get_reranking_prompt(self.query, [x[-1].desc for x in topk_expandable_paths], topk=self.max_beam_size)
+    # `self.get_reranking_prompt`, not the bare module function: `hp` and `logger` are
+    # REQUIRED positional args there, so calling it directly raised TypeError. The partial
+    # built in __init__ has both bound. Same defect as the chain_path_rel_fn call above, and
+    # it survived for the same reason -- nothing in the repo calls these methods.
+    prompt, constraint = self.get_reranking_prompt(self.query, [x[-1].desc for x in topk_expandable_paths], topk=self.max_beam_size)
     return topk_expandable_paths, prompt, constraint
 
   def process_expandable_paths_rerank_response(self, topk_expandable_paths, rerank_response):
-    ranking = repair_json(rerank_response, return_objects=True)['ranking']
+    ranking = recursive_key_search(repair_json(rerank_response, return_objects=True), 'ranking')
+    ranking = self._valid_ranking(ranking, len(topk_expandable_paths))
     ranked_expandable_paths = [topk_expandable_paths[i] for i in ranking]
     self.beam_state_paths_history.append(self.beam_state_paths)
     self.beam_state_paths = [x for x in ranked_expandable_paths]

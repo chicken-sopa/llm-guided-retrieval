@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import numpy as np
-from datasets import load_dataset
 from json_repair import repair_json
 from sklearn.cluster import AgglomerativeClustering
 
@@ -487,6 +486,13 @@ def load_source_records(args: argparse.Namespace, logger: logging.Logger) -> lis
             logger.info(f"Loading dataset split {args.dataset}/{args.subset} via datasets.load_dataset")
             if args.dataset.upper() != "BRIGHT":
                 raise ValueError("Automatic dataset loading is only implemented for BRIGHT.")
+            # Imported HERE, not at module scope: `datasets` belongs to the tree-building
+            # research stack (src/requirements.txt), not to lattice-core's install deps, and this
+            # is the ONLY line that needs it. At module scope it made the whole builder
+            # unimportable in a host project that feeds it a local --input, which is the normal
+            # way to build a tree for a corpus of your own.
+            from datasets import load_dataset
+
             records = list(load_dataset("xlangai/BRIGHT", "documents", split=args.subset))
 
     if args.max_leaves is not None:
